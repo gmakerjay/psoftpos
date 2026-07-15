@@ -202,12 +202,11 @@ class PrinterManager:
         commands.append(ESC + b'a' + b'\x00')  # Left align
         
         # ข้อมูลบิล
-        commands.append(f"Bill No: {receipt_data['sale_number']}\n".encode('ascii'))
-        commands.append(f"Date: {receipt_data.get('sale_date', '-')}\n".encode('ascii'))
+        commands.append(f"เลขที่: {receipt_data['sale_number']}\n".encode('cp874', errors='ignore'))
+        commands.append(f"วันที่: {receipt_data.get('sale_date', '-')}\n".encode('cp874', errors='ignore'))
         cashier = receipt_data.get('cashier', '-')
         if show_cashier and cashier and cashier != '-':
-            commands.append(f"Cashier: ".encode('ascii'))
-            commands.append(cashier.encode('cp874', errors='ignore') + b'\n')
+            commands.append(f"พนักงาน: {cashier}\n".encode('cp874', errors='ignore'))
         commands.append(b'-' * width + b'\n')
         
         # รายการสินค้า
@@ -234,9 +233,14 @@ class PrinterManager:
         # สรุปยอด
         def right_align(label, value):
             val_str = f"{value:,.2f}"
-            spaces = width - len(label) - len(val_str)
+            # คำนวณความกว้างตัวอักษรจริงของภาษาไทยโดยไม่นับรวมสระ/วรรณยุกต์ที่ซ้อนบนล่าง (เพราะไม่ใช้พื้นที่แนวนอน)
+            label_len = sum(1 for c in label if c not in [
+                '\u0e31', '\u0e34', '\u0e35', '\u0e36', '\u0e37', '\u0e38', '\u0e39', '\u0e3a',
+                '\u0e47', '\u0e48', '\u0e49', '\u0e4a', '\u0e4b', '\u0e4c', '\u0e4d', '\u0e4e'
+            ])
+            spaces = width - label_len - len(val_str)
             if spaces < 1: spaces = 1
-            return (label + " " * spaces + val_str).encode('ascii', errors='ignore') + b'\n'
+            return (label + " " * spaces + val_str).encode('cp874', errors='ignore') + b'\n'
         
         subtotal = receipt_data.get('subtotal', receipt_data.get('total_amount', 0))
         discount = receipt_data.get('discount_amount', 0)
@@ -246,19 +250,19 @@ class PrinterManager:
         change = receipt_data.get('change_amount', 0)
         
         if discount > 0:
-            commands.append(right_align("Subtotal:", subtotal))
-            commands.append(right_align("Discount:", discount))
+            commands.append(right_align("ยอดรวม:", subtotal))
+            commands.append(right_align("ส่วนลด:", discount))
         if tax > 0:
-            commands.append(right_align("Tax:", tax))
+            commands.append(right_align("ภาษี VAT:", tax))
         
         # TOTAL ตัวหนา
         commands.append(ESC + b'E' + b'\x01')  # Bold ON
-        commands.append(right_align("TOTAL:", total))
+        commands.append(right_align("ยอดสุทธิ:", total))
         commands.append(ESC + b'E' + b'\x00')  # Bold OFF
         
         commands.append(b'-' * width + b'\n')
-        commands.append(right_align("Paid:", paid))
-        commands.append(right_align("Change:", change))
+        commands.append(right_align("รับเงิน:", paid))
+        commands.append(right_align("เงินทอน:", change))
         
         # Barcode (ถ้าเปิดใช้งาน)
         if show_barcode:
