@@ -278,3 +278,170 @@ def create_receipt_pdf(receipt_data, filename=None, paper_size="A4"):
 def export_sales_report(sales_data, filename):
     """Export รายงานยอดขาย (ไม่ใช้แล้ว - ใช้ Excel แทน)"""
     pass
+
+
+def create_barcode_labels_pdf(print_items, filename, cols=3, rows=10, show_name=True, show_price=True, show_code=True):
+    """
+    สร้างไฟล์ PDF สำหรับพริ้นบาร์โค้ดสินค้าในแบบตาราง (Grid Labels) ลงในกระดาษ A4
+    """
+    register_thai_font()
+    
+    filename = Path(filename)
+    if filename.parent:
+        filename.parent.mkdir(parents=True, exist_ok=True)
+        
+    try:
+        # กำหนดขนาดกระดาษ A4 (210 x 297 mm)
+        page_w, page_h = A4
+        margin = 5 * mm
+        printable_w = page_w - (2 * margin)
+        printable_h = page_h - (2 * margin)
+        
+        cell_w = printable_w / cols
+        cell_h = printable_h / rows
+        
+        doc = SimpleDocTemplate(
+            str(filename),
+            pagesize=A4,
+            rightMargin=margin,
+            leftMargin=margin,
+            topMargin=margin,
+            bottomMargin=margin
+        )
+        
+        styles = getSampleStyleSheet()
+        
+        # สร้าง Style เฉพาะสำหรับป้ายสติ๊กเกอร์
+        name_style = ParagraphStyle(
+            'LabelName',
+            parent=styles['Normal'],
+            fontName='THSarabunBold',
+            fontSize=8,
+            leading=9,
+            alignment=1, # Center
+            textColor=colors.black
+        )
+        
+        info_style = ParagraphStyle(
+            'LabelInfo',
+            parent=styles['Normal'],
+            fontName='THSarabun',
+            fontSize=8,
+            leading=9,
+            alignment=1, # Center
+            textColor=colors.black
+        )
+        
+        labels = []
+        
+        for item in print_items:
+            name = item.get('product_name', '-')
+            code = item.get('barcode', '')
+            price = item.get('retail_price', 0)
+            qty = int(item.get('quantity', 1))
+            
+            if not code:
+                continue
+                
+            # วนลูปตามจำนวนดวงที่ต้องการพิมพ์
+            for _ in range(qty):
+                label_story = []
+                
+                # 1. ชื่อสินค้า
+                if show_name:
+                    # ตัดชื่อถ้าสั้นเกินไปให้แสดงเป็นบรรทัดเดียว
+                    short_name = name[:35] + ".." if len(name) > 35 else name
+                    label_story.append(Paragraph(short_name, name_style))
+                
+                # 2. บาร์โค้ด
+                try:
+                    from reportlab.graphics.barcodes import code128
+                    # ปรับ barWidth อัตโนมัติตามจำนวนหลักเพื่อไม่ให้ล้นช่อง
+                    bar_w = 0.35 * mm
+                    if len(code) > 15:
+                        bar_w = 0.25 * mm
+                    elif len(code) > 10:
+                        bar_w = 0.3 * mm
+                        
+                    barcode_flowable = code128.Code128(
+                        code, 
+                        barHeight=8*mm, 
+                        barWidth=bar_w,
+                        quiet=False
+                    )
+                    
+                    t_bar = Table([[barcode_flowable]], colWidths=[cell_w - 4*mm])
+                    t_bar.setStyle(TableStyle([
+                        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                        ('LEFTPADDING', (0,0), (-1,-1), 0),
+                        ('RIGHTPADDING', (0,0), (-1,-1), 0),
+                        ('TOPPADDING', (0,0), (-1,-1), 2),
+                        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+                    ]))
+                    label_story.append(t_bar)
+                except Exception as e:
+                    print(f"Barcode gen fail for '{code}': {e}")
+                    # ถ้าสร้างไม่สำเร็จ ให้ใส่ช่องว่าง
+                    label_story.append(Spacer(1, 8*mm))
+                
+                # 3. รหัสและราคา
+                info_parts = []
+                if show_code:
+                    info_parts.append(code)
+                if show_price:
+                    info_parts.append(f"<b>฿{price:,.2f}</b>")
+                    
+                if info_parts:
+                    info_text = "  |  ".join(info_parts)
+                    label_story.append(Paragraph(info_text, info_style))
+                    
+                # สร้างตารางย่อยครอบเพื่อให้จัดกลางในช่อง Grid ได้
+                label_table = Table([ [label_story] ], colWidths=[cell_w - 2*mm], rowHeights=[cell_h - 2*mm])
+                label_table.setStyle(TableStyle([
+                    ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                    ('LEFTPADDING', (0,0), (-1,-1), 1),
+                    ('RIGHTPADDING', (0,0), (-1,-1), 1),
+                    ('TOPPADDING', (0,0), (-1,-1), 1),
+                    ('BOTTOMPADDING', (0,0), (-1,-1), 1),
+                ]))
+                
+                labels.append(label_table)
+                
+        if not labels:
+            return False
+            
+        # จัดดวงป้ายทั้งหมดใส่ในโครงตารางหลัก (Grid)
+        rows_data = []
+        for i in range(0, len(labels), cols):
+            chunk = labels[i:i+cols]
+            # เติมช่องว่างหากแถวสุดท้ายไม่เต็มคอลัมน์
+            while len(chunk) < cols:
+                chunk.append(Paragraph("", name_style))
+            rows_data.append(chunk)
+            
+        # สร้าง Master Table
+        master_table = Table(
+            rows_data, 
+            colWidths=[cell_w] * cols,
+            rowHeights=[cell_h] * len(rows_data)
+        )
+        master_table.setStyle(TableStyle([
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('GRID', (0,0), (-1,-1), 0.3, colors.lightgrey), # วาดตารางสีจางเพื่อให้ง่ายต่อการตัดป้าย
+            ('LEFTPADDING', (0,0), (-1,-1), 0),
+            ('RIGHTPADDING', (0,0), (-1,-1), 0),
+            ('TOPPADDING', (0,0), (-1,-1), 0),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 0),
+        ]))
+        
+        story = [master_table]
+        doc.build(story)
+        return True
+    except Exception as e:
+        print(f"Error building barcode labels PDF: {e}")
+        import traceback
+        traceback.print_exc()
+        return False

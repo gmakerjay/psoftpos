@@ -149,7 +149,12 @@ class PrinterManager:
         """สร้างคำสั่ง ESC/POS มาตรฐาน (รองรับ 58mm/80mm)"""
         ESC = b'\x1b'
         GS = b'\x1d'
-        commands = [ESC + b'@', ESC + b't' + b'\x1e']  # Init + Thai code page
+        FS = b'\x1c'
+        commands = [
+            ESC + b'@', 
+            FS + b'.', 
+            ESC + b't\x1a'
+        ]  # Init + Cancel Chinese character mode + Select Thai CP874
         width = 32 if self.paper_size == "58mm" else 48
         
         # ดึงการตั้งค่าล่าสุดจาก Database เสมอ เพื่อการันตีว่าค่าที่บันทึกส่งผลจริงทันที 100%
@@ -549,7 +554,7 @@ class PrinterManager:
             page_width = int((print_width_mm / 25.4) * dpi_x)
             
             # สร้างฟอนต์
-            font_name = "Sarabun"
+            font_name = "FC Sara Samkan"
             font_title = win32ui.CreateFont({
                 'name': font_name,
                 'height': int(title_sz * dpi_y / 72),

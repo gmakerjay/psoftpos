@@ -8,7 +8,7 @@ from tkinter import messagebox, filedialog
 from PIL import Image, ImageTk
 from utils import (
     generate_product_barcode, create_barcode, optimize_image, 
-    ExcelManager, bind_english_input
+    ExcelManager, bind_english_input, create_barcode_labels_pdf
 )
 from config import *
 from database import DatabaseManager
@@ -109,6 +109,18 @@ class ProductManagementFrame(ctk.CTkFrame):
             command=self.download_template_action
         )
         template_btn.pack(side="left", padx=5)
+        
+        barcode_print_btn = ctk.CTkButton(
+            btn_frame,
+            text="🖨️ พิมพ์บาร์โค้ด",
+            font=FONTS["button"],
+            width=135,
+            height=40,
+            fg_color="#8e44ad",
+            hover_color="#732d91",
+            command=self.show_barcode_print_dialog
+        )
+        barcode_print_btn.pack(side="left", padx=5)
         
         # กรอบหลัก
         main_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -1531,4 +1543,445 @@ class ProductManagementFrame(ctk.CTkFrame):
             return photo
         except Exception:
             return None
+
+    def show_barcode_print_dialog(self):
+        """เปิดหน้าต่างตั้งค่าพิมพ์บาร์โค้ดสินค้า"""
+        BarcodePrintDialog(self)
+
+
+class BarcodePrintDialog(ctk.CTkToplevel):
+    """หน้าต่างสำหรับตั้งค่าและสั่งพิมพ์บาร์โค้ดแบบดวงตาราง"""
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.parent = parent
+        self.db = parent.db
+        
+        self.title("ระบบพิมพ์ป้ายบาร์โค้ดสินค้า (Bulk Barcode Label Printer)")
+        self.geometry("980x680")
+        self.resizable(True, True)
+        
+        # ตั้งค่าให้อยู่ตรงกลางจอและแย่ง focus
+        self.transient(parent)
+        self.grab_set()
+        
+        self.update_idletasks()
+        x = (self.winfo_screenwidth() - 980) // 2
+        y = (self.winfo_screenheight() - 680) // 2
+        self.geometry(f"+{x}+{y}")
+        
+        # จัดเก็บรายการสินค้าที่จะพิมพ์ {product_id: item_dict}
+        self.selected_items = {}
+        
+        self.create_widgets()
+        
+    def create_widgets(self):
+        # แผงแบ่งสองคอลัมน์ ซ้าย (ค้นหาและตารางรายการ) ขวา (การตั้งค่าพิมพ์)
+        main_split = ctk.CTkFrame(self, fg_color="transparent")
+        main_split.pack(fill="both", expand=True, padx=15, pady=15)
+        
+        # ===== คอลัมน์ซ้าย: ค้นหา + รายการที่จะพิมพ์ =====
+        left_column = ctk.CTkFrame(main_split, fg_color="white", corner_radius=12)
+        left_column.pack(side="left", fill="both", expand=True, padx=(0, 10))
+        
+        # หัวเรื่องซ้าย
+        left_title = ctk.CTkLabel(
+            left_column, 
+            text="📋 รายการป้ายสินค้าที่ต้องการจัดพิมพ์", 
+            font=("Sarabun", 18, "bold"),
+            text_color=COLORS["primary"]
+        )
+        left_title.pack(anchor="w", padx=15, pady=(15, 5))
+        
+        # ช่องค้นหาสินค้าเพื่อเพิ่มในตารางพิมพ์
+        search_label = ctk.CTkLabel(
+            left_column,
+            text="🔍 พิมพ์ชื่อสินค้า หรือยิงบาร์โค้ด เพื่อเพิ่มรายการ:",
+            font=("Sarabun", 14),
+            text_color=COLORS["text_dark"]
+        )
+        search_label.pack(anchor="w", padx=15, pady=(5, 2))
+        
+        self.search_entry = ctk.CTkEntry(
+            left_column,
+            placeholder_text="ค้นหาสินค้าตรงนี้...",
+            font=("Sarabun", 14),
+            height=40
+        )
+        self.search_entry.pack(fill="x", padx=15, pady=(0, 5))
+        self.search_entry.bind("<KeyRelease>", self._on_search_key)
+        
+        # Scrollable สำหรับแสดงผลลัพธ์การค้นหา
+        self.results_scroll = ctk.CTkScrollableFrame(
+            left_column, 
+            height=120, 
+            fg_color="#f5f6fa",
+            corner_radius=8
+        )
+        # ซ่อนไว้เริ่มต้น จะแสดงเฉพาะเมื่อพิมพ์ค้นหา
+        
+        # คอนเทนเนอร์ตารางรายการสินค้าที่จะพิมพ์
+        table_header = ctk.CTkFrame(left_column, fg_color="#f1f2f6", height=32, corner_radius=4)
+        table_header.pack(fill="x", padx=15, pady=(10, 0))
+        table_header.pack_propagate(False)
+        
+        ctk.CTkLabel(table_header, text="ชื่อสินค้า", font=("Sarabun", 13, "bold"), text_color=COLORS["text_dark"]).pack(side="left", padx=10)
+        ctk.CTkLabel(table_header, text="จัดการจำนวนพิมพ์", font=("Sarabun", 13, "bold"), text_color=COLORS["text_dark"]).pack(side="right", padx=100)
+        
+        self.table_scroll = ctk.CTkScrollableFrame(left_column, fg_color="transparent")
+        self.table_scroll.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        self.update_table_display()
+        
+        # ===== คอลัมน์ขวา: การตั้งค่า Layout + ปุ่ม Print =====
+        right_column = ctk.CTkFrame(main_split, width=320, fg_color="#f8f9fa", corner_radius=12)
+        right_column.pack(side="right", fill="y", expand=False)
+        right_column.pack_propagate(False)
+        
+        right_title = ctk.CTkLabel(
+            right_column, 
+            text="⚙️ ตั้งค่ากระดาษ & Layout", 
+            font=("Sarabun", 18, "bold"),
+            text_color=COLORS["primary"]
+        )
+        right_title.pack(anchor="w", padx=15, pady=(15, 15))
+        
+        # รูปแบบตาราง / Layout
+        layout_label = ctk.CTkLabel(
+            right_column,
+            text="รูปแบบช่องตาราง (ขนาด A4):",
+            font=("Sarabun", 14, "bold"),
+            text_color=COLORS["text_dark"]
+        )
+        layout_label.pack(anchor="w", padx=15, pady=(5, 2))
+        
+        self.layout_combo = ctk.CTkComboBox(
+            right_column,
+            values=[
+                "A4: 3 คอลัมน์ x 10 แถว (30 ดวง/หน้า)",
+                "A4: 4 คอลัมน์ x 12 แถว (48 ดวง/หน้า)",
+                "A4: 5 คอลัมน์ x 15 แถว (75 ดวง/หน้า)"
+            ],
+            font=("Sarabun", 14),
+            height=35,
+            width=280,
+            state="readonly"
+        )
+        self.layout_combo.set("A4: 3 คอลัมน์ x 10 แถว (30 ดวง/หน้า)")
+        self.layout_combo.pack(anchor="w", padx=15, pady=(0, 15))
+        
+        # ตัวเลือกฟิลด์ข้อมูลที่จะพิมพ์
+        options_label = ctk.CTkLabel(
+            right_column,
+            text="ข้อมูลที่จะแสดงบนป้าย:",
+            font=("Sarabun", 14, "bold"),
+            text_color=COLORS["text_dark"]
+        )
+        options_label.pack(anchor="w", padx=15, pady=(10, 5))
+        
+        self.show_name_var = ctk.BooleanVar(value=True)
+        self.show_name_cb = ctk.CTkCheckBox(
+            right_column, text="แสดงชื่อสินค้า", font=("Sarabun", 14),
+            variable=self.show_name_var, text_color=COLORS["text_dark"]
+        )
+        self.show_name_cb.pack(anchor="w", padx=20, pady=5)
+        
+        self.show_price_var = ctk.BooleanVar(value=True)
+        self.show_price_cb = ctk.CTkCheckBox(
+            right_column, text="แสดงราคาสินค้า", font=("Sarabun", 14),
+            variable=self.show_price_var, text_color=COLORS["text_dark"]
+        )
+        self.show_price_cb.pack(anchor="w", padx=20, pady=5)
+        
+        self.show_code_var = ctk.BooleanVar(value=True)
+        self.show_code_cb = ctk.CTkCheckBox(
+            right_column, text="แสดงบาร์โค้ดใต้รูป", font=("Sarabun", 14),
+            variable=self.show_code_var, text_color=COLORS["text_dark"]
+        )
+        self.show_code_cb.pack(anchor="w", padx=20, pady=5)
+        
+        # ส่วนท้าย: ปุ่มดำเนินการ
+        button_frame = ctk.CTkFrame(right_column, fg_color="transparent")
+        button_frame.pack(fill="x", side="bottom", padx=15, pady=20)
+        
+        self.preview_btn = ctk.CTkButton(
+            button_frame,
+            text="🧪 แสดงตัวอย่างใบพิมพ์ (PDF)",
+            font=("Sarabun", 16, "bold"),
+            height=45,
+            fg_color=COLORS["success"],
+            hover_color="#45a049",
+            command=self.generate_labels_preview
+        )
+        self.preview_btn.pack(fill="x", pady=(0, 10))
+        
+        close_btn = ctk.CTkButton(
+            button_frame,
+            text="✕ ปิดหน้าต่าง",
+            font=("Sarabun", 15),
+            height=35,
+            fg_color=COLORS["text_light"],
+            hover_color="#95a5a6",
+            command=self.destroy
+        )
+        close_btn.pack(fill="x")
+        
+    def _on_search_key(self, event=None):
+        query = self.search_entry.get().strip().lower()
+        
+        # ล้างผลการค้นหาเก่า
+        for widget in self.results_scroll.winfo_children():
+            widget.destroy()
+            
+        if not query:
+            self.results_scroll.pack_forget()
+            return
+            
+        try:
+            self.db.connect()
+            products = self.db.fetch_all("""
+                SELECT product_id, barcode, product_name, retail_price, stock_quantity
+                FROM products
+                WHERE is_active = 1
+                AND (LOWER(product_name) LIKE ? OR LOWER(barcode) LIKE ?)
+                LIMIT 6
+            """, (f"%{query}%", f"%{query}%"))
+            self.db.disconnect()
+        except Exception as e:
+            print(f"Search product error: {e}")
+            products = []
+            
+        if products:
+            self.results_scroll.pack(fill="x", after=self.search_entry, padx=15, pady=(2, 10))
+            for p in products:
+                # ปุ่มผลการค้นหา
+                btn = ctk.CTkButton(
+                    self.results_scroll,
+                    text=f"➕ {p['product_name']} ({p['barcode'] or 'ไม่มีรหัส'}) - ฿{p['retail_price']:,.2f} [คลัง: {p['stock_quantity']}]",
+                    anchor="w",
+                    fg_color="transparent",
+                    text_color=COLORS["text_dark"],
+                    hover_color="#e1e2e6",
+                    height=32,
+                    font=("Sarabun", 13),
+                    command=lambda prod=p: self.add_product_to_print(prod)
+                )
+                btn.pack(fill="x", padx=5, pady=1)
+        else:
+            self.results_scroll.pack_forget()
+            
+    def add_product_to_print(self, product):
+        pid = product['product_id']
+        barcode = product['barcode']
+        
+        if not barcode:
+            messagebox.showwarning("ไม่มีรหัสบาร์โค้ด", f"สินค้า '{product['product_name']}' ไม่มีรหัสบาร์โค้ด ไม่สามารถเพิ่มรายการพิมพ์ได้")
+            return
+            
+        if pid not in self.selected_items:
+            # เริ่มต้นดึงจำนวนจากคลัง หากคลังเป็น 0 หรือน้อยกว่า ให้เริ่มที่ 10 ดวง
+            default_qty = product['stock_quantity'] if product['stock_quantity'] > 0 else 10
+            # ลิมิตเริ่มต้นไม่ให้มากเกินไป
+            default_qty = min(default_qty, 30)
+            
+            self.selected_items[pid] = {
+                'product_id': pid,
+                'product_name': product['product_name'],
+                'barcode': barcode,
+                'retail_price': product['retail_price'],
+                'stock_quantity': product['stock_quantity'],
+                'quantity': default_qty
+            }
+        else:
+            # บวกเพิ่ม 10 ดวงถ้ากดย้ำ
+            self.selected_items[pid]['quantity'] += 10
+            
+        self.search_entry.delete(0, 'end')
+        self.results_scroll.pack_forget()
+        self.update_table_display()
+        
+    def remove_item(self, pid):
+        if pid in self.selected_items:
+            del self.selected_items[pid]
+            self.update_table_display()
+            
+    def update_table_display(self):
+        # ล้าง widget ในตารางเก่า
+        for widget in self.table_scroll.winfo_children():
+            widget.destroy()
+            
+        if not self.selected_items:
+            empty_lbl = ctk.CTkLabel(
+                self.table_scroll,
+                text="⚠️ ยังไม่มีรายการสินค้าที่จะพิมพ์\nกรุณาพิมพ์ชื่อสินค้าเพื่อค้นหาและเพิ่มรายการด้านบน",
+                font=("Sarabun", 14),
+                text_color=COLORS["text_light"],
+                justify="center"
+            )
+            empty_lbl.pack(fill="both", expand=True, pady=60)
+            return
+            
+        for pid, item in self.selected_items.items():
+            row_frame = ctk.CTkFrame(self.table_scroll, fg_color="transparent")
+            row_frame.pack(fill="x", pady=4, padx=5)
+            
+            # คอลัมน์ซ้าย: ชื่อสินค้า + บาร์โค้ด
+            name_lbl = ctk.CTkLabel(
+                row_frame,
+                text=f"{item['product_name']}\n(รหัสบาร์โค้ด: {item['barcode']})",
+                font=("Sarabun", 14),
+                text_color=COLORS["text_dark"],
+                anchor="w",
+                justify="left"
+            )
+            name_lbl.pack(side="left", padx=10)
+            
+            # คอลัมน์ขวา: ปุ่มควบคุมจำนวนพิมพ์ + ปุ่มลบ
+            actions_frame = ctk.CTkFrame(row_frame, fg_color="transparent")
+            actions_frame.pack(side="right", padx=5)
+            
+            # ปุ่มลบ 🗑️
+            del_btn = ctk.CTkButton(
+                actions_frame,
+                text="🗑️",
+                width=30,
+                height=30,
+                fg_color="#e74c3c",
+                hover_color="#c0392b",
+                font=("Arial", 12),
+                command=lambda p_id=pid: self.remove_item(p_id)
+            )
+            del_btn.pack(side="right", padx=(10, 0))
+            
+            # ปุ่มบวก ➕
+            plus_btn = ctk.CTkButton(
+                actions_frame,
+                text="+",
+                width=30,
+                height=30,
+                fg_color=COLORS["primary"],
+                font=("Arial", 14, "bold"),
+                command=lambda p_id=pid: self.adjust_qty(p_id, 1)
+            )
+            plus_btn.pack(side="right")
+            
+            # Entry กรอกจำนวน
+            qty_var = ctk.StringVar(value=str(item['quantity']))
+            qty_entry = ctk.CTkEntry(
+                actions_frame,
+                width=50,
+                height=30,
+                font=("Sarabun", 13),
+                justify="center",
+                textvariable=qty_var
+            )
+            qty_entry.pack(side="right", padx=5)
+            
+            # ดักจับเมื่อผู้ใช้พิมพ์แก้ไขเอง
+            def make_validate_cmd(p_id=pid, var=qty_var):
+                def validate_input(*args):
+                    try:
+                        val = int(var.get())
+                        if val < 1:
+                            val = 1
+                        self.selected_items[p_id]['quantity'] = val
+                    except ValueError:
+                        pass
+                return validate_input
+            
+            qty_var.trace_add("write", make_validate_cmd(pid, qty_var))
+            
+            # ปุ่มลบ ➖
+            minus_btn = ctk.CTkButton(
+                actions_frame,
+                text="-",
+                width=30,
+                height=30,
+                fg_color=COLORS["primary"],
+                font=("Arial", 14, "bold"),
+                command=lambda p_id=pid: self.adjust_qty(p_id, -1)
+            )
+            minus_btn.pack(side="right")
+            
+            # แสดงข้อมูลสต็อกและราคาคร่าวๆ
+            stock_lbl = ctk.CTkLabel(
+                actions_frame,
+                text=f"สต็อก: {item['stock_quantity']} ดวง  ",
+                font=("Sarabun", 12),
+                text_color=COLORS["text_light"]
+            )
+            stock_lbl.pack(side="right", padx=10)
+            
+            # เส้นคั่นระหว่างแถว
+            divider = ctk.CTkFrame(self.table_scroll, fg_color="#e1e2e6", height=1)
+            divider.pack(fill="x", pady=2)
+            
+    def adjust_qty(self, pid, diff):
+        if pid in self.selected_items:
+            new_qty = self.selected_items[pid]['quantity'] + diff
+            if new_qty < 1:
+                new_qty = 1
+            self.selected_items[pid]['quantity'] = new_qty
+            self.update_table_display()
+            
+    def generate_labels_preview(self):
+        if not self.selected_items:
+            messagebox.showwarning("ยังไม่ได้เลือกสินค้า", "กรุณาเพิ่มรายการสินค้าที่จะพิมพ์ลงในตารางก่อนดำเนินการต่อ")
+            return
+            
+        # หาขนาดกริดตามที่เลือก
+        layout_str = self.layout_combo.get()
+        if "3 คอลัมน์" in layout_str:
+            cols, rows = 3, 10
+        elif "4 คอลัมน์" in layout_str:
+            cols, rows = 4, 12
+        else:
+            cols, rows = 5, 15
+            
+        show_name = self.show_name_var.get()
+        show_price = self.show_price_var.get()
+        show_code = self.show_code_var.get()
+        
+        # แปลงเป็น list สำหรับการสร้างไฟล์
+        items_list = list(self.selected_items.values())
+        
+        # ลิสต์ไฟล์ที่จะเซฟชั่วคราว
+        temp_dir = Path("data/temp")
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        pdf_path = temp_dir / "barcode_labels_preview.pdf"
+        
+        # ปิดปุ่มระหว่างทำงานเพื่อความปลอดภัย
+        self.preview_btn.configure(state="disabled", text="⏳ กำลังสร้างไฟล์ PDF...")
+        self.update()
+        
+        success = create_barcode_labels_pdf(
+            items_list, 
+            str(pdf_path), 
+            cols=cols, 
+            rows=rows, 
+            show_name=show_name, 
+            show_price=show_price, 
+            show_code=show_code
+        )
+        
+        self.preview_btn.configure(state="normal", text="🧪 แสดงตัวอย่างใบพิมพ์ (PDF)")
+        
+        if success:
+            try:
+                # เปิดพรีวิวไฟล์ PDF ขึ้นมาเพื่อให้ผู้ใช้สั่งพิมพ์ผ่านโปรแกรมอ่าน PDF
+                os.startfile(str(pdf_path.resolve()))
+                # แสดงข้อความสำเร็จ
+                messagebox.showinfo(
+                    "สร้างไฟล์พรีวิวสำเร็จ",
+                    f"สร้างไฟล์ PDF ตัวอย่างบาร์โค้ดเรียบร้อยแล้ว\n"
+                    f"ระบบได้เปิดไฟล์บาร์โค้ดให้ท่านแล้ว ท่านสามารถสั่งพิมพ์ผ่านโปรแกรมเปิด PDF ได้ทันที\n"
+                    f"(หรือพิมพ์ขนาด A4 เพื่อทดสอบดวงสติ๊กเกอร์ของท่าน)"
+                )
+            except Exception as e:
+                messagebox.showerror(
+                    "เกิดข้อผิดพลาด",
+                    f"สร้างไฟล์ PDF สำเร็จแต่ไม่สามารถเปิดพรีวิวโดยอัตโนมัติได้:\n{e}\n"
+                    f"กรุณาเปิดไฟล์เองที่: {pdf_path.resolve()}"
+                )
+        else:
+            messagebox.showerror("เกิดข้อผิดพลาด", "ระบบไม่สามารถสร้างไฟล์ PDF บาร์โค้ดได้ กรุณาลองใหม่อีกครั้ง")
 

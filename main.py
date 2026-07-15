@@ -56,10 +56,32 @@ def ensure_directories():
         os.makedirs(dir_path, exist_ok=True)
         print(f"Checked/Created directory: {dir_path}")
 
+def register_process_font():
+    """ลงทะเบียนฟอนต์ภาษาไทยสำหรับ Windows GDI ทั่วทั้งโปรแกรม"""
+    try:
+        import platform
+        if platform.system() == 'Windows':
+            import ctypes
+            base_path = os.path.dirname(os.path.abspath(__file__))
+            font_path = os.path.join(base_path, "FC Sara Samkan [Non-commercial] Bold.ttf")
+            if os.path.exists(font_path):
+                res = ctypes.windll.gdi32.AddFontResourceW(font_path)
+                if res > 0:
+                    print(f"Registered GDI Font resource: {font_path} (result: {res})")
+                    try:
+                        import win32con
+                        import win32gui
+                        win32gui.PostMessage(win32con.HWND_BROADCAST, win32con.WM_FONTCHANGE, 0, 0)
+                    except Exception:
+                        pass
+    except Exception as e:
+        print(f"Failed to register process font: {e}")
+
 def main():
     """ฟังก์ชันหลักของโปรแกรม"""
     try:
         ensure_directories()
+        register_process_font()
         logger.info("Starting POS System...")
         
         # ===== BYPASS ACTIVATION (สำหรับทดสอบ) =====
