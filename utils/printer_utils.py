@@ -545,10 +545,7 @@ class PrinterManager:
 
             # เตรียม Device Context
             hdc = win32ui.CreateDC()
-            if devmode:
-                hdc.CreatePrinterDC(p_name, devmode)
-            else:
-                hdc.CreatePrinterDC(p_name)
+            hdc.CreatePrinterDC(p_name)
             
             hdc.StartDoc("POS Receipt " + receipt_data.get('sale_number', ''))
             hdc.StartPage()
