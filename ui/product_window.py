@@ -99,9 +99,21 @@ class ProductManagementFrame(ctk.CTkFrame):
         )
         import_btn.pack(side="left", padx=5)
 
+        export_btn = ctk.CTkButton(
+            btn_frame,
+            text="📥 ส่งออก Excel",
+            font=FONTS["button"],
+            width=120,
+            height=40,
+            fg_color="#27ae60",
+            hover_color="#219653",
+            command=self.export_products_action
+        )
+        export_btn.pack(side="left", padx=5)
+
         template_btn = ctk.CTkButton(
             btn_frame,
-            text="📥 เทมเพลต",
+            text="📄 เทมเพลต",
             font=FONTS["button"],
             width=110,
             height=40,
@@ -1347,6 +1359,69 @@ class ProductManagementFrame(ctk.CTkFrame):
                 os.startfile(os.path.dirname(save_path))
             else:
                 messagebox.showerror("ผิดพลาด", "ไม่สามารถสร้างเทมเพลตได้")
+        except Exception as e:
+            messagebox.showerror("ผิดพลาด", f"เกิดข้อผิดพลาด: {e}")
+
+    def export_products_action(self):
+        """ส่งออกสินค้าทั้งหมดเป็น Excel เพื่อนำไปใช้งานหรือสำรองข้อมูล"""
+        try:
+            save_path = filedialog.asksaveasfilename(
+                title="ส่งออกรายการสินค้า",
+                defaultextension=".xlsx",
+                filetypes=[("Excel files", "*.xlsx")],
+                initialfile=f"export_สินค้า_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            )
+            if not save_path:
+                return
+
+            self.db.connect()
+            products = self.db.fetch_all("""
+                SELECT p.*, c.category_name
+                FROM products p
+                LEFT JOIN categories c ON p.category_id = c.category_id
+                WHERE p.is_active = 1
+                ORDER BY p.product_id ASC
+            """)
+            self.db.disconnect()
+
+            if not products:
+                messagebox.showwarning("แจ้งเตือน", "ไม่มีข้อมูลสินค้าในฐานข้อมูลสำหรับส่งออก")
+                return
+
+            columns = [
+                "บาร์โค้ด", "ชื่อสินค้า", "หมวดหมู่",
+                "ราคาทุน", "ราคาขายปกติ", "ราคาขายส่ง",
+                "ราคาพิเศษ1", "ราคาพิเศษ2",
+                "จำนวนสต็อก", "สต็อกขั้นต่ำ"
+            ]
+
+            export_data = []
+            for p in products:
+                export_data.append({
+                    "บาร์โค้ด": str(p.get("barcode", "") or "").strip(),
+                    "ชื่อสินค้า": str(p.get("product_name", "") or "").strip(),
+                    "หมวดหมู่": str(p.get("category_name", "") or "").strip(),
+                    "ราคาทุน": float(p.get("cost_price", 0.0) or 0.0),
+                    "ราคาขายปกติ": float(p.get("retail_price", 0.0) or 0.0),
+                    "ราคาขายส่ง": float(p.get("wholesale_price", 0.0) or 0.0),
+                    "ราคาพิเศษ1": float(p.get("special_price1", 0.0) or 0.0),
+                    "ราคาพิเศษ2": float(p.get("special_price2", 0.0) or 0.0),
+                    "จำนวนสต็อก": int(p.get("stock_quantity", 0) or 0),
+                    "สต็อกขั้นต่ำ": int(p.get("min_stock", 10) or 10)
+                })
+
+            success = ExcelManager.export_to_excel(
+                export_data, columns, save_path,
+                "สินค้า", "รายการสินค้าทั้งหมดสำหรับนำเข้าและสำรองข้อมูล"
+            )
+            if success:
+                messagebox.showinfo(
+                    "สำเร็จ",
+                    f"ส่งออกสินค้าจำนวน {len(export_data)} รายการสำเร็จ!\n\nบันทึกที่: {save_path}"
+                )
+                os.startfile(os.path.dirname(save_path))
+            else:
+                messagebox.showerror("ผิดพลาด", "ไม่สามารถส่งออกข้อมูลสินค้าได้")
         except Exception as e:
             messagebox.showerror("ผิดพลาด", f"เกิดข้อผิดพลาด: {e}")
 
