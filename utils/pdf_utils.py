@@ -245,7 +245,7 @@ def create_receipt_pdf(receipt_data, filename=None, paper_size="A4"):
 
         if show_barcode:
             try:
-                from reportlab.graphics.barcodes import code128
+                from reportlab.graphics.barcode import code128
                 barcode_val = receipt_data.get('sale_number', '')
                 if barcode_val:
                     barcode_flowable = code128.Code128(barcode_val, barHeight=10*mm, barWidth=0.5*mm)
@@ -355,7 +355,7 @@ def create_barcode_labels_pdf(print_items, filename, cols=3, rows=10, show_name=
                 
                 # 2. บาร์โค้ด
                 try:
-                    from reportlab.graphics.barcodes import code128
+                    from reportlab.graphics.barcode import code128
                     # ปรับ barWidth อัตโนมัติตามจำนวนหลักเพื่อไม่ให้ล้นช่อง
                     bar_w = 0.35 * mm
                     if len(code) > 15:

@@ -552,7 +552,8 @@ class ProductManagementFrame(ctk.CTkFrame):
             try:
                 img = create_barcode(val)
                 if img:
-                    img.thumbnail((300, 50), Image.Resampling.NEAREST)
+                    # resize ให้ขนาดแถบบาร์โค้ดใหญ่พอมองเห็นและสแกนได้
+                    img = img.resize((350, 100), Image.Resampling.LANCZOS)
                     photo = ImageTk.PhotoImage(img)
                     barcode_preview_lbl.configure(image=photo, text="")
                     barcode_preview_lbl.image = photo # Keep reference
@@ -855,7 +856,8 @@ class ProductManagementFrame(ctk.CTkFrame):
             try:
                 img = create_barcode(val)
                 if img:
-                    img.thumbnail((300, 50), Image.Resampling.NEAREST)
+                    # resize ให้ขนาดแถบบาร์โค้ดใหญ่พอมองเห็นและสแกนได้
+                    img = img.resize((350, 100), Image.Resampling.LANCZOS)
                     photo = ImageTk.PhotoImage(img)
                     barcode_preview_lbl.configure(image=photo, text="")
                     barcode_preview_lbl.image = photo # Keep reference
