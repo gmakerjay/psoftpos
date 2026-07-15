@@ -1,0 +1,32 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# PyInstaller builds and executables
+build/
+dist/
+*.spec
+
+# Application Data & Databases
+data/*.db
+data/products/*
+data/backups/*
+Backup/
+Logs/
+Excel_Exports/
+printer_debug.log
+
+# Zipped Portable Build
+StorePOS_Portable.zip
+
+# IDE configs
+.idea/
+.vscode/

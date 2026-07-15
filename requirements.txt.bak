@@ -1,0 +1,14 @@
+customtkinter==5.2.1
+Pillow==10.2.0
+python-barcode==0.15.1
+qrcode[pil]==7.4.2
+openpyxl==3.1.2
+pandas==2.1.4
+reportlab==4.0.9
+matplotlib==3.8.2
+numpy==1.26.3
+tkcalendar==1.6.1
+pyserial==3.5
+python-escpos==3.0
+bcrypt==4.1.2
+cryptography==42.0.0

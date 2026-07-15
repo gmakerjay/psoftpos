@@ -1,0 +1,15 @@
+customtkinter
+Pillow
+python-barcode
+qrcode[pil]
+openpyxl
+pandas
+reportlab
+matplotlib
+numpy
+tkcalendar
+pyserial
+python-escpos
+bcrypt
+cryptography
+pywin32

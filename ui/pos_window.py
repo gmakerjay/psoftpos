@@ -1,0 +1,1520 @@
+# -*- coding: utf-8 -*-
+"""
+หน้าขายสินค้า (POS - Point of Sale)
+"""
+
+import customtkinter as ctk
+from tkinter import messagebox
+from database import DatabaseManager
+from utils import create_receipt_pdf, SalesLogManager, print_receipt, bind_english_input, kick_cash_drawer
+from config import *
+from datetime import datetime
+import json
+
+
+class POSFrame(ctk.CTkFrame):
+    """Frame สำหรับขายสินค้า - Optimized for low-end computers"""
+    
+    def __init__(self, parent, user_id, user_info):
+        super().__init__(parent, fg_color=COLORS["light"])
+        self.user_id = user_id
+        self.user_info = user_info
+        self.db = DatabaseManager()
+        self.slm = SalesLogManager()
+        
+        # ตัวแปรสำหรับจัดการหลายหน้าขาย (Sessions)
+        self.sessions = []
+        self.active_session_index = 0
+        
+        # สร้าง session แรก
+        self.add_new_session(initial=True)
+        
+        # Performance optimization: Cache
+        self._products_cache = {}  # Cache สินค้าที่ค้นหาบ่อย
+        self._cache_time = None
+        self._autocomplete_data = []  # ข้อมูลสำหรับ autocomplete
+        
+        # สร้าง UI ก่อน
+        self.create_widgets()
+        
+        # จากนั้นค่อย update summary และโหลดข้อมูล
+        self.update_summary()
+        self.load_autocomplete_data()  # โหลดข้อมูล autocomplete ครั้งเดียว
+        self.setup_keyboard_shortcuts()  # ตั้งค่า shortcuts
+        
+    def create_widgets(self):
+        """สร้าง UI"""
+        # แถบเลือกหน้าขาย (Tabs) อยู่ด้านบนสุด
+        self.tab_container = ctk.CTkFrame(self, fg_color="transparent", height=50)
+        self.tab_container.pack(fill="x", padx=20, pady=(10, 0))
+        self.update_tabs_ui()
+        
+        # แบ่งหน้าจอเป็น 2 ส่วน
+        # ซ้าย: ค้นหาและรายการสินค้า
+        # ขวา: รายการขายและชำระเงิน
+        
+        main_container = ctk.CTkFrame(self, fg_color="transparent")
+        main_container.pack(fill="both", expand=True)
+        
+        left_frame = ctk.CTkFrame(main_container, fg_color="transparent")
+        left_frame.pack(side="left", fill="both", expand=True, padx=(20, 10), pady=(10, 20))
+        
+        right_frame = ctk.CTkFrame(main_container, fg_color="white", corner_radius=15, width=450)
+        right_frame.pack(side="right", fill="y", padx=(10, 20), pady=(10, 20))
+        right_frame.pack_propagate(False)
+        
+        self.create_left_panel(left_frame)
+        self.create_right_panel(right_frame)
+        
+    def create_left_panel(self, parent):
+        """สร้างแผงซ้าย - ค้นหาและเลือกสินค้า"""
+        # Header with Customer Display button
+        header_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        header_frame.pack(fill="x", pady=(0, 20))
+        
+        header = ctk.CTkLabel(
+            header_frame,
+            text="💰 ขายสินค้า (POS)",
+            font=FONTS["title"],
+            text_color=COLORS["primary"]
+        )
+        header.pack(side="left")
+        
+        # Customer Display Button
+        self.display_btn = ctk.CTkButton(
+            header_frame,
+            text="📺 เปิดจอลูกค้า",
+            font=FONTS["button"],
+            width=150,
+            height=40,
+            fg_color=COLORS["info"],
+            hover_color=COLORS["hover"],
+            command=self.toggle_customer_display
+        )
+        self.display_btn.pack(side="right", padx=10)
+        
+        self.customer_display = None
+        
+        # ช่องค้นหา
+        search_frame = ctk.CTkFrame(parent, fg_color="white", corner_radius=10)
+        search_frame.pack(fill="x", pady=(0, 15))
+        
+        search_label = ctk.CTkLabel(
+            search_frame,
+            text="🔍",
+            font=("Arial", 24)
+        )
+        search_label.pack(side="left", padx=15)
+        
+        self.search_entry = ctk.CTkEntry(
+            search_frame,
+            placeholder_text="สแกนบาร์โค้ดหรือค้นหาสินค้า...",
+            font=FONTS["body"],
+            height=50,
+            border_width=0
+        )
+        self.search_entry.pack(side="left", fill="x", expand=True, padx=(0, 15), pady=15)
+        self.search_entry.bind("<Return>", lambda e: self.search_product())
+        self.search_entry.focus()
+        # บังคับ EN input สำหรับปืนบาร์โค้ดทุกรุ่น
+        bind_english_input(self.search_entry)
+        
+        search_btn = ctk.CTkButton(
+            search_frame,
+            text="ค้นหา",
+            font=FONTS["button"],
+            width=100,
+            height=40,
+            fg_color=COLORS["primary"],
+            command=self.search_product
+        )
+        search_btn.pack(side="left", padx=(0, 15))
+        
+        # ประเภทราคา (ตัดออกเหลือแค่ราคาปกติ)
+        self.price_type_var = ctk.StringVar(value="retail")
+        
+        # รายการสินค้าที่พบ
+        ctk.CTkLabel(
+            parent,
+            text="รายการสินค้า",
+            font=FONTS["heading"],
+            text_color=COLORS["text_dark"]
+        ).pack(anchor="w", pady=(10, 10))
+        
+        self.products_list = ctk.CTkScrollableFrame(
+            parent,
+            fg_color="white",
+            corner_radius=10
+        )
+        self.products_list.pack(fill="both", expand=True)
+        
+        # โหลดสินค้าทั้งหมด
+        self.load_all_products()
+        
+    def add_new_session(self, initial=False):
+        """เพิ่มหน้าขายใหม่"""
+        session = {
+            'cart_items': [],
+            'price_type': "retail",
+            'discount_type': "amount",
+            'discount_value': 0,
+            'vat_enabled': False,
+            'vat_rate': TAX_RATE
+        }
+        self.sessions.append(session)
+        
+        if not initial:
+            self.switch_session(len(self.sessions) - 1)
+        else:
+            self.active_session_index = 0
+            self.load_session_data(0)
+
+    def save_current_session_data(self):
+        """บันทึกข้อมูลหน้าขายปัจจุบันลงในลิสต์ sessions"""
+        if 0 <= self.active_session_index < len(self.sessions):
+            self.sessions[self.active_session_index] = {
+                'cart_items': self.cart_items,
+                'price_type': "retail", # ปัจจุบัน POS นี้ล็อคที่ retail ใน UI
+                'discount_type': self.discount_type_combo.get() if hasattr(self, 'discount_type_combo') else "บาท",
+                'discount_value': float(self.discount_entry.get()) if hasattr(self, 'discount_entry') and self.discount_entry.get() else 0,
+                'vat_enabled': self.vat_enabled,
+                'vat_rate': self.vat_rate
+            }
+
+    def load_session_data(self, index):
+        """โหลดข้อมูลหน้าขายจากลิสต์ sessions มายังตัวแปรหลัก"""
+        session = self.sessions[index]
+        self.cart_items = session['cart_items']
+        self.price_type = session['price_type']
+        self.discount_type = session['discount_type']
+        self.discount_value = session['discount_value']
+        self.vat_enabled = session['vat_enabled']
+        self.vat_rate = session['vat_rate']
+        
+        # อัปเดต UI widgets ถ้าถูกสร้างแล้ว
+        if hasattr(self, 'discount_entry'):
+            self.discount_entry.delete(0, 'end')
+            self.discount_entry.insert(0, str(int(self.discount_value) if self.discount_value == int(self.discount_value) else self.discount_value))
+            self.discount_type_combo.set(self.discount_type if self.discount_type in ["บาท", "%"] else "บาท")
+            
+            if self.vat_enabled:
+                self.vat_checkbox.select()
+            else:
+                self.vat_checkbox.deselect()
+                
+            self.vat_entry.delete(0, 'end')
+            self.vat_entry.insert(0, str(int(self.vat_rate * 100)))
+
+    def switch_session(self, index):
+        """สลับไปหน้าขายที่ระบุ"""
+        if index == self.active_session_index:
+            return
+            
+        self.save_current_session_data()
+        self.active_session_index = index
+        self.load_session_data(index)
+        
+        # รีเฟรช UI
+        self.update_tabs_ui()
+        self.update_cart_display()
+        self.update_summary()
+        self.search_entry.focus()
+
+    def remove_session(self, index):
+        """ลบหน้าขาย"""
+        if len(self.sessions) <= 1:
+            messagebox.showwarning("แจ้งเตือน", "ไม่สามารถลบหน้าขายสุดท้ายได้")
+            return
+            
+        if self.sessions[index]['cart_items']:
+            if not messagebox.askyesno("ยืนยัน", "หน้าขายนี้มีสินค้าอยู่ ต้องการลบหรือไม่?"):
+                return
+                
+        self.sessions.pop(index)
+        
+        # ปรับ index ปัจจุบัน
+        if index <= self.active_session_index:
+            self.active_session_index = max(0, self.active_session_index - 1)
+            
+        self.load_session_data(self.active_session_index)
+        self.update_tabs_ui()
+        self.update_cart_display()
+        self.update_summary()
+
+    def update_tabs_ui(self):
+        """อัปเดต UI ของแถบเลือกหน้าขาย"""
+        if not hasattr(self, 'tab_container'):
+            return
+            
+        for widget in self.tab_container.winfo_children():
+            widget.destroy()
+            
+        for i, session in enumerate(self.sessions):
+            is_active = (i == self.active_session_index)
+            
+            tab_frame = ctk.CTkFrame(
+                self.tab_container, 
+                fg_color=COLORS["primary"] if is_active else "white",
+                corner_radius=10,
+                border_width=1 if not is_active else 0,
+                border_color=COLORS["border"]
+            )
+            tab_frame.pack(side="left", padx=5)
+            
+            # ปุ่มสลับหน้า
+            items_count = len(session['cart_items'])
+            tab_btn = ctk.CTkButton(
+                tab_frame,
+                text=f"ลูกค้า {i+1} ({items_count})",
+                font=("Sarabun", 13, "bold") if is_active else ("Sarabun", 13),
+                fg_color="transparent",
+                text_color="white" if is_active else COLORS["text_dark"],
+                hover_color=COLORS["secondary"] if is_active else COLORS["light"],
+                width=120,
+                command=lambda idx=i: self.switch_session(idx)
+            )
+            tab_btn.pack(side="left", padx=(5, 0), pady=2)
+            
+            # ปุ่มกากบาทลบ tab
+            if len(self.sessions) > 1:
+                close_btn = ctk.CTkButton(
+                    tab_frame,
+                    text="✕",
+                    width=20,
+                    height=20,
+                    font=("Arial", 10, "bold"),
+                    fg_color="transparent",
+                    text_color="white" if is_active else COLORS["danger"],
+                    hover_color="#ff4d4f" if is_active else "#fff1f0",
+                    command=lambda idx=i: self.remove_session(idx)
+                )
+                close_btn.pack(side="left", padx=(0, 5))
+                
+        # ปุ่มเพิ่มหน้าขายใหม่
+        add_btn = ctk.CTkButton(
+            self.tab_container,
+            text="+ เพิ่มหน้าขาย",
+            font=FONTS["small"],
+            width=100,
+            height=34,
+            fg_color="white",
+            text_color=COLORS["primary"],
+            border_width=1,
+            border_color=COLORS["primary"],
+            hover_color=COLORS["light"],
+            command=self.add_new_session
+        )
+        add_btn.pack(side="left", padx=10)
+        
+    def create_right_panel(self, parent):
+        """สร้างแผงขวา - รายการขายและชำระเงิน"""
+        # Header
+        header_frame = ctk.CTkFrame(parent, fg_color=COLORS["primary"], corner_radius=0)
+        header_frame.pack(fill="x")
+        
+        ctk.CTkLabel(
+            header_frame,
+            text="รายการสินค้าในตะกร้า",
+            font=FONTS["heading"],
+            text_color="white"
+        ).pack(pady=15)
+        
+        # รายการในตะกร้า
+        self.cart_list = ctk.CTkScrollableFrame(
+            parent,
+            fg_color=COLORS["light"],
+            corner_radius=0,
+            height=300
+        )
+        self.cart_list.pack(fill="both", expand=True)
+        
+        # ส่วนลด
+        discount_frame = ctk.CTkFrame(parent, fg_color="white", corner_radius=0)
+        discount_frame.pack(fill="x", padx=15, pady=15)
+        
+        ctk.CTkLabel(
+            discount_frame,
+            text="ส่วนลด:",
+            font=FONTS["body"]
+        ).pack(side="left", padx=(0, 10))
+        
+        self.discount_entry = ctk.CTkEntry(
+            discount_frame,
+            width=100,
+            height=35,
+            font=FONTS["body"]
+        )
+        self.discount_entry.pack(side="left", padx=5)
+        self.discount_entry.insert(0, "0")
+        self.discount_entry.bind("<KeyRelease>", lambda e: self.update_summary())
+        
+        self.discount_type_combo = ctk.CTkComboBox(
+            discount_frame,
+            values=["บาท", "%"],
+            width=70,
+            height=35,
+            font=FONTS["body"],
+            state="readonly",
+            command=lambda v: self.update_summary()
+        )
+        self.discount_type_combo.pack(side="left", padx=5)
+        self.discount_type_combo.set("บาท")
+        
+        # สรุปยอด
+        summary_frame = ctk.CTkFrame(parent, fg_color=COLORS["light"], corner_radius=10)
+        summary_frame.pack(fill="x", padx=15, pady=(0, 15))
+        
+        # ยอดรวม
+        sum_frame = ctk.CTkFrame(summary_frame, fg_color="transparent")
+        sum_frame.pack(fill="x", padx=15, pady=10)
+        
+        ctk.CTkLabel(
+            sum_frame,
+            text="ยอดรวม:",
+            font=FONTS["body"]
+        ).pack(side="left")
+        
+        self.subtotal_label = ctk.CTkLabel(
+            sum_frame,
+            text="฿0.00",
+            font=("Sarabun", 18, "bold"),
+            text_color=COLORS["text_dark"]
+        )
+        self.subtotal_label.pack(side="right")
+        
+        # ส่วนลด
+        disc_frame = ctk.CTkFrame(summary_frame, fg_color="transparent")
+        disc_frame.pack(fill="x", padx=15, pady=5)
+        
+        ctk.CTkLabel(
+            disc_frame,
+            text="ส่วนลด:",
+            font=FONTS["body"]
+        ).pack(side="left")
+        
+        self.discount_label = ctk.CTkLabel(
+            disc_frame,
+            text="฿0.00",
+            font=FONTS["body"],
+            text_color=COLORS["danger"]
+        )
+        self.discount_label.pack(side="right")
+        
+        # ภาษี VAT (มีปุ่มควบคุม)
+        vat_frame = ctk.CTkFrame(summary_frame, fg_color="transparent")
+        vat_frame.pack(fill="x", padx=15, pady=5)
+        
+        # ส่วนซ้าย: Label และ Checkbox
+        vat_left_frame = ctk.CTkFrame(vat_frame, fg_color="transparent")
+        vat_left_frame.pack(side="left")
+        
+        self.vat_checkbox = ctk.CTkCheckBox(
+            vat_left_frame,
+            text="",
+            width=20,
+            checkbox_width=20,
+            checkbox_height=20,
+            command=self.toggle_vat
+        )
+        self.vat_checkbox.pack(side="left")
+        # self.vat_checkbox.select()  # ปิดโดยเริ่มต้นตามต้องการ
+        
+        # self.vat_label_text = ctk.CTkLabel(
+        #     vat_left_frame,
+        #     text=f"ภาษี VAT",
+        #     font=FONTS["body"]
+        # )
+        # self.vat_label_text.pack(side="left", padx=(5, 0))
+        
+        # ช่องแก้ไข VAT %
+        vat_input_frame = ctk.CTkFrame(vat_left_frame, fg_color="transparent")
+        vat_input_frame.pack(side="left", padx=5)
+        
+        self.vat_entry = ctk.CTkEntry(
+            vat_input_frame,
+            width=50,
+            height=25,
+            font=FONTS["small"]
+        )
+        self.vat_entry.pack(side="left")
+        self.vat_entry.insert(0, str(int(TAX_RATE * 100)))
+        self.vat_entry.bind("<KeyRelease>", lambda e: self.update_vat_rate())
+        
+        ctk.CTkLabel(
+            vat_input_frame,
+            text="%",
+            font=FONTS["small"]
+        ).pack(side="left", padx=(2, 0))
+        
+        # ส่วนขวา: ยอดภาษี
+        self.tax_label = ctk.CTkLabel(
+            vat_frame,
+            text="฿0.00",
+            font=FONTS["body"],
+            text_color=COLORS["text_dark"]
+        )
+        self.tax_label.pack(side="right")
+        
+        # เส้นแบ่ง
+        separator = ctk.CTkFrame(summary_frame, fg_color=COLORS["border"], height=2)
+        separator.pack(fill="x", padx=15, pady=10)
+        
+        # ยอดสุทธิ
+        total_frame = ctk.CTkFrame(summary_frame, fg_color="transparent")
+        total_frame.pack(fill="x", padx=15, pady=(5, 15))
+        
+        ctk.CTkLabel(
+            total_frame,
+            text="ยอดสุทธิ:",
+            font=("Sarabun", 18, "bold")
+        ).pack(side="left")
+        
+        self.total_label = ctk.CTkLabel(
+            total_frame,
+            text="฿0.00",
+            font=("Sarabun", 48, "bold"),
+            text_color="#27ae60"  # สีเขียวเข้มขึ้น
+        )
+        self.total_label.pack(side="right")
+        
+        # แสดงรับเงิน/เงินทอนล่าสุด
+        self.last_payment_frame = ctk.CTkFrame(summary_frame, fg_color="white", corner_radius=10)
+        self.last_payment_frame.pack(fill="x", padx=15, pady=(0, 10))
+        
+        # แถวเงินรับ
+        recv_row = ctk.CTkFrame(self.last_payment_frame, fg_color="transparent")
+        recv_row.pack(fill="x", padx=10, pady=(5, 0))
+        ctk.CTkLabel(recv_row, text="รับเงินล่าสุด:", font=FONTS["small"]).pack(side="left")
+        self.last_paid_label = ctk.CTkLabel(recv_row, text="฿0.00", font=FONTS["body"])
+        self.last_paid_label.pack(side="right")
+        
+        # แถวเงินทอน
+        change_row = ctk.CTkFrame(self.last_payment_frame, fg_color="transparent")
+        change_row.pack(fill="x", padx=10, pady=(0, 5))
+        ctk.CTkLabel(change_row, text="เงินทอน:", font=FONTS["body"], text_color=COLORS["success"]).pack(side="left")
+        self.last_change_label = ctk.CTkLabel(change_row, text="฿0.00", font=("Sarabun", 18, "bold"), text_color=COLORS["success"])
+        self.last_change_label.pack(side="right")
+        
+        # ซ่อนไว้ก่อน
+        self.last_payment_frame.pack_forget()
+
+        # ปุ่มด้านล่าง
+        btn_frame = ctk.CTkFrame(parent, fg_color="white", corner_radius=0)
+        btn_frame.pack(fill="x", padx=15, pady=(0, 15))
+        
+        checkout_btn = ctk.CTkButton(
+            btn_frame,
+            text="💰 ชำระเงิน (F10)",
+            font=("Sarabun", 16, "bold"),
+            height=60,
+            fg_color=COLORS["success"],
+            hover_color="#45a049",
+            command=self.show_checkout_dialog
+        )
+        checkout_btn.pack(fill="x", pady=5)
+
+        
+    def load_all_products(self):
+        """โหลดสินค้าทั้งหมด (with LIMIT)"""
+        # ล้างรายการเดิม
+        for widget in self.products_list.winfo_children():
+            widget.destroy()
+        
+        # ดึงข้อมูล (ใช้ LIMIT ตาม Performance Mode)
+        limit = PERFORMANCE_MODE["items_per_page"] if PERFORMANCE_MODE["enabled"] else 50
+        self.db.connect()
+        products = self.db.fetch_all("""
+            SELECT product_id, barcode, product_name, retail_price, 
+                   wholesale_price, special_price1, special_price2,
+                   stock_quantity, image_path
+            FROM products 
+            WHERE is_active = 1 AND stock_quantity > 0
+            ORDER BY product_name
+            LIMIT ?
+        """, (limit,))
+        self.db.disconnect()
+        
+        if not products:
+            ctk.CTkLabel(
+                self.products_list,
+                text="ไม่มีสินค้าในระบบ",
+                font=FONTS["body"],
+                text_color=COLORS["text_light"]
+            ).pack(pady=30)
+            return
+        
+        # แสดงสินค้า
+        for product in products:
+            self.create_product_card(product)
+    
+    def create_product_card(self, product):
+        """สร้างการ์ดสินค้า"""
+        card = ctk.CTkFrame(self.products_list, fg_color=COLORS["light"], corner_radius=10)
+        card.pack(fill="x", padx=5, pady=5)
+        
+        # ชื่อและราคา
+        info_frame = ctk.CTkFrame(card, fg_color="transparent")
+        info_frame.pack(side="left", fill="both", expand=True, padx=15, pady=10)
+        
+        name_label = ctk.CTkLabel(
+            info_frame,
+            text=product['product_name'],
+            font=FONTS["body"],
+            anchor="w"
+        )
+        name_label.pack(fill="x")
+        
+        # แสดงราคาตามประเภทที่เลือก
+        price_type = self.price_type_var.get()
+        price = product[f'{price_type}_price']
+        
+        price_label = ctk.CTkLabel(
+            info_frame,
+            text=f"฿{price:,.2f}",
+            font=("Sarabun", 16, "bold"),
+            text_color=COLORS["success"],
+            anchor="w"
+        )
+        price_label.pack(fill="x")
+        
+        stock_label = ctk.CTkLabel(
+            info_frame,
+            text=f"คงเหลือ: {product['stock_quantity']} ชิ้น",
+            font=FONTS["small"],
+            text_color=COLORS["text_light"],
+            anchor="w"
+        )
+        stock_label.pack(fill="x")
+        
+        # ปุ่มเพิ่มในตะกร้า
+        add_btn = ctk.CTkButton(
+            card,
+            text="➕",
+            font=("Arial", 20),
+            width=50,
+            height=50,
+            fg_color=COLORS["primary"],
+            hover_color=COLORS["secondary"],
+            command=lambda p=product: self.add_to_cart(p)
+        )
+        add_btn.pack(side="right", padx=10, pady=10)
+    
+    def search_product(self, event=None):
+        """ค้นหาสินค้า - Optimized with caching"""
+        search_text = self.search_entry.get().strip()
+        
+        if not search_text:
+            self.load_all_products()
+            return
+        
+        # ล้างรายการเดิม
+        for widget in self.products_list.winfo_children():
+            widget.destroy()
+        
+        # ตรวจสอบ cache ก่อน (ลด query ซ้ำ)
+        cache_key = f"search_{search_text.lower()}"
+        if cache_key in self._products_cache:
+            cached_data = self._products_cache[cache_key]
+            
+            # กรณีเป็นสินค้าชิ้นเดียว (Exact Match)
+            if not isinstance(cached_data, list):
+                # เคย scan บาร์โค้ดนี้แล้ว -> เพิ่มสินค้าเลย
+                self.add_to_cart(cached_data)
+                self.search_entry.delete(0, 'end')
+                
+                # Auto Focus กลับที่ช่องค้นหาทันที
+                self.after(10, lambda: self.search_entry.focus())
+                return
+            
+            # กรณีเป็นรายการสินค้า (Search Results)
+            products = cached_data
+        else:
+            # ค้นหาจาก database
+            self.db.connect()
+            
+            # ลองหาจากบาร์โค้ดก่อน (exact match)
+            product = self.db.fetch_one(
+                "SELECT * FROM products WHERE barcode = ? AND is_active = 1",
+                (search_text,)
+            )
+            
+            if product:
+                # เจอบาร์โค้ด ใส่ในตะกร้าเลย
+                self.add_to_cart(product)
+                self.search_entry.delete(0, 'end')
+                self.db.disconnect()
+                
+                # เก็บข้อมูลสินค้าลง Cache
+                self._products_cache[cache_key] = product
+                
+                # ไม่ต้อง reload รายการสินค้า (ประหยัด CPU — Performance)
+                # self.load_all_products()  # ตัดออกเพื่อลดการกระพริบ
+                
+                # Auto Focus กลับที่ช่องค้นหาทันที
+                self.after(10, lambda: self.search_entry.focus())
+                return
+            
+            # ค้นหาจากชื่อ (เพิ่ม LIMIT สำหรับ performance)
+            limit = PERFORMANCE_MODE["items_per_page"] if PERFORMANCE_MODE["enabled"] else 30
+            products = self.db.fetch_all("""
+                SELECT product_id, barcode, product_name, retail_price, 
+                       wholesale_price, special_price1, special_price2,
+                       stock_quantity, image_path
+                FROM products 
+                WHERE is_active = 1 
+                AND (LOWER(product_name) LIKE ? OR LOWER(barcode) LIKE ?)
+                AND stock_quantity > 0
+                ORDER BY product_name
+                LIMIT ?
+            """, (f"%{search_text.lower()}%", f"%{search_text.lower()}%", limit))
+            
+            self.db.disconnect()
+            
+            # บันทึก cache (สูงสุด PRODUCTS_CACHE_SIZE หรือ 100 รายการ)
+            max_cache_size = 100
+            try:
+                import performance_config
+                max_cache_size = performance_config.PRODUCTS_CACHE_SIZE
+            except ImportError:
+                pass
+            if len(self._products_cache) > max_cache_size:
+                self._products_cache.clear()
+            self._products_cache[cache_key] = products
+        
+        if not products:
+            messagebox.showwarning("ไม่พบสินค้า", f"ไม่พบรหัสสินค้า: '{search_text}'")
+            self.search_entry.delete(0, 'end')
+            self.search_entry.focus()
+            return
+        
+        # แสดงผล (ใช้ virtual scrolling ถ้ามากกว่า 20 รายการ)
+        for product in products:
+            self.create_product_card(product)
+    
+    def add_to_cart(self, product):
+        """เพิ่มสินค้าในตะกร้า"""
+        unit_price = product['retail_price']
+        
+        # ตรวจสอบว่ามีในตะกร้าแล้วหรือไม่
+        found = False
+        for item in self.cart_items:
+            if item['product_id'] == product['product_id']:
+                # ตรวจสอบสต็อก
+                remaining = product['stock_quantity'] - item['quantity']
+                if remaining <= 0:
+                    messagebox.showwarning("แจ้งเตือน", "สินค้าในสต็อกไม่เพียงพอ")
+                    return
+                    
+                # เพิ่มจำนวน
+                item['quantity'] += 1
+                item['total'] = item['quantity'] * item['unit_price']
+                
+                # แจ้งเตือนสินค้าเหลือน้อย
+                new_remaining = product['stock_quantity'] - item['quantity']
+                if new_remaining <= 3:
+                    messagebox.showwarning("⚠️ สินค้าใกล้หมดขั้นวิกฤต", f"ขณะนี้ '{product['product_name']}' เหลือในสต็อกเพียง {new_remaining} ชิ้นเท่านั้น!")
+                found = True
+                break
+        
+        if not found:
+            # ตรวจสอบสต็อกสำหรับชิ้นแรก
+            if product['stock_quantity'] <= 0:
+                messagebox.showwarning("แจ้งเตือน", "สินค้าหมดสต็อก")
+                return
+                
+            # เพิ่มใหม่
+            img_path = product['image_path'] if 'image_path' in product.keys() else None
+            self.cart_items.append({
+                'product_id': product['product_id'],
+                'product_name': product['product_name'],
+                'quantity': 1,
+                'unit_price': unit_price,
+                'total': unit_price,
+                'max_stock': product['stock_quantity'],
+                'image_path': img_path
+            })
+            
+            # แจ้งเตือนชิ้นแรก
+            remaining = product['stock_quantity'] - 1
+            if remaining <= 3:
+                messagebox.showwarning("⚠️ สินค้าใกล้หมดขั้นวิกฤต", f"ขณะนี้ '{product['product_name']}' เหลือในสต็อกเพียง {remaining} ชิ้นเท่านั้น!")
+        
+        self.update_cart_display()
+        self.update_summary()
+        self.update_tabs_ui()  # อัปเดตจำนวนสินค้าบน tab
+        self.update_customer_display()  # อัพเดทจอลูกค้า
+    
+    def update_cart_display(self):
+        """อัพเดทการแสดงผลตะกร้า"""
+        # ล้างรายการเดิม
+        for widget in self.cart_list.winfo_children():
+            widget.destroy()
+        
+        if not self.cart_items:
+            ctk.CTkLabel(
+                self.cart_list,
+                text="ไม่มีสินค้าในตะกร้า",
+                font=FONTS["body"],
+                text_color=COLORS["text_light"]
+            ).pack(pady=30)
+            return
+        
+        # แสดงรายการ
+        for idx, item in enumerate(self.cart_items):
+            item_frame = ctk.CTkFrame(
+                self.cart_list,
+                fg_color="white",
+                corner_radius=8
+            )
+            item_frame.pack(fill="x", padx=5, pady=5)
+            
+            # ชื่อสินค้า
+            name_label = ctk.CTkLabel(
+                item_frame,
+                text=item['product_name'],
+                font=FONTS["body"],
+                anchor="w"
+            )
+            name_label.pack(fill="x", padx=10, pady=(10, 5))
+            
+            # จำนวนและราคา
+            detail_frame = ctk.CTkFrame(item_frame, fg_color="transparent")
+            detail_frame.pack(fill="x", padx=10, pady=(0, 10))
+            
+            # ปุ่มลด
+            minus_btn = ctk.CTkButton(
+                detail_frame,
+                text="-",
+                width=30,
+                height=30,
+                font=("Arial", 16, "bold"),
+                fg_color=COLORS["danger"],
+                command=lambda i=idx: self.decrease_quantity(i)
+            )
+            minus_btn.pack(side="left", padx=2)
+            
+            # จำนวน
+            qty_label = ctk.CTkLabel(
+                detail_frame,
+                text=str(item['quantity']),
+                font=FONTS["body"],
+                width=40
+            )
+            qty_label.pack(side="left", padx=5)
+            
+            # ปุ่มเพิ่ม
+            plus_btn = ctk.CTkButton(
+                detail_frame,
+                text="+",
+                width=30,
+                height=30,
+                font=("Arial", 16, "bold"),
+                fg_color=COLORS["success"],
+                command=lambda i=idx: self.increase_quantity(i)
+            )
+            plus_btn.pack(side="left", padx=2)
+            
+            # ราคารวม
+            total_label = ctk.CTkLabel(
+                detail_frame,
+                text=f"฿{item['total']:,.2f}",
+                font=("Sarabun", 16, "bold"),
+                text_color=COLORS["success"]
+            )
+            total_label.pack(side="right")
+            
+            # ปุ่มลบ
+            delete_btn = ctk.CTkButton(
+                detail_frame,
+                text="🗑️",
+                width=30,
+                height=30,
+                font=("Arial", 14),
+                fg_color=COLORS["danger"],
+                command=lambda i=idx: self.remove_from_cart(i)
+            )
+            delete_btn.pack(side="right", padx=5)
+    
+    def increase_quantity(self, index):
+        """เพิ่มจำนวนสินค้า"""
+        item = self.cart_items[index]
+        if item['quantity'] < item['max_stock']:
+            item['quantity'] += 1
+            item['total'] = item['quantity'] * item['unit_price']
+            self.update_cart_display()
+            self.update_summary()
+            self.update_tabs_ui()  # อัปเดตจำนวนสินค้าบน tab
+        else:
+            messagebox.showwarning("แจ้งเตือน", "สินค้าในสต็อกไม่เพียงพอ")
+    
+    def decrease_quantity(self, index):
+        """ลดจำนวนสินค้า"""
+        item = self.cart_items[index]
+        if item['quantity'] > 1:
+            item['quantity'] -= 1
+            item['total'] = item['quantity'] * item['unit_price']
+            self.update_cart_display()
+            self.update_summary()
+            self.update_tabs_ui()  # อัปเดตจำนวนสินค้าบน tab
+        else:
+            self.remove_from_cart(index)
+    
+    def remove_from_cart(self, index):
+        """ลบสินค้าออกจากตะกร้า"""
+        del self.cart_items[index]
+        self.update_cart_display()
+        self.update_summary()
+        self.update_tabs_ui()  # อัปเดตจำนวนสินค้าบน tab
+    
+    
+    def update_summary(self):
+        """อัพเดทสรุปยอด"""
+        # คำนวณยอดรวม
+        subtotal = sum(item['total'] for item in self.cart_items)
+        
+        # คำนวณส่วนลด
+        try:
+            discount_value = float(self.discount_entry.get())
+        except:
+            discount_value = 0
+        
+        discount_type = self.discount_type_combo.get()
+        
+        if discount_type == "%":
+            discount_amount = (subtotal * discount_value) / 100
+        else:
+            discount_amount = discount_value
+        
+        # ยอดหลังหักส่วนลด
+        after_discount = subtotal - discount_amount
+        if after_discount < 0:
+            after_discount = 0
+        
+        # ภาษี VAT (ใช้อัตราที่ตั้งไว้)
+        if self.vat_enabled:
+            tax_amount = after_discount * self.vat_rate
+        else:
+            tax_amount = 0
+        
+        # ยอดสุทธิ
+        total = after_discount + tax_amount
+        
+        # อัพเดท UI
+        self.subtotal_label.configure(text=f"฿{subtotal:,.2f}")
+        self.discount_label.configure(text=f"฿{discount_amount:,.2f}")
+        self.tax_label.configure(text=f"฿{tax_amount:,.2f}")
+        self.total_label.configure(text=f"฿{total:,.2f}")
+        
+        # อัพเดท Customer Display (ถ้าเปิดอยู่) - ไม่เรียก update_customer_display() ที่นี่
+        # เพื่อป้องกัน infinite recursion
+    
+    def clear_cart(self):
+        """ล้างตะกร้า"""
+        if self.cart_items:
+            result = messagebox.askyesno(
+                "ยืนยัน",
+                "ต้องการล้างรายการสินค้าทั้งหมดหรือไม่?"
+            )
+            if result:
+                self.cart_items.clear()  # ใช้ .clear() แทน = [] เพื่อไม่ตัด reference จาก session (BUG-009)
+                self.update_cart_display()
+                self.update_summary()
+                self.update_tabs_ui()  # อัปเดตจำนวนสินค้าบน tab
+                if hasattr(self, 'last_payment_frame'):  # ป้องกัน crash ถ้ายังไม่ได้สร้าง (BUG-014)
+                    self.last_payment_frame.pack_forget()
+                self.update_customer_display()  # อัพเดทจอลูกค้า
+                self.search_entry.focus()
+    
+    
+    def show_checkout_dialog(self):
+        """แสดงหน้าต่างชำระเงิน"""
+        if not self.cart_items:
+            messagebox.showwarning("แจ้งเตือน", "ไม่มีรายการสินค้าในตะกร้า")
+            return
+        
+        # คำนวณยอดสุทธิ (ใช้ VAT settings)
+        subtotal = sum(item['total'] for item in self.cart_items)
+        
+        try:
+            discount_value = float(self.discount_entry.get())
+        except:
+            discount_value = 0
+        
+        discount_type = self.discount_type_combo.get()
+        
+        if discount_type == "%":
+            discount_amount = (subtotal * discount_value) / 100
+        else:
+            discount_amount = discount_value
+        
+        after_discount = subtotal - discount_amount
+        if after_discount < 0:
+            after_discount = 0
+        
+        # ใช้ VAT settings แทน TAX_RATE
+        if self.vat_enabled:
+            tax_amount = after_discount * self.vat_rate
+        else:
+            tax_amount = 0
+        
+        total = after_discount + tax_amount
+        
+        # สร้างหน้าต่าง
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("ชำระเงิน")
+        dialog.geometry("500x400")
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        # ยอดที่ต้องชำระ
+        ctk.CTkLabel(
+            dialog,
+            text=f"ยอดที่ต้องชำระ: ฿{total:,.2f}",
+            font=("Sarabun", 24, "bold"),
+            text_color=COLORS["success"]
+        ).pack(pady=30)
+        
+        # รับเงิน
+        ctk.CTkLabel(
+            dialog,
+            text="รับเงิน:",
+            font=FONTS["heading"]
+        ).pack(pady=(20, 10))
+        
+        paid_entry = ctk.CTkEntry(
+            dialog,
+            font=("Sarabun", 20),
+            height=50,
+            justify="center"
+        )
+        paid_entry.pack(padx=50, fill="x", pady=10)
+        paid_entry.insert(0, str(total))
+        paid_entry.select_range(0, 'end')
+        paid_entry.focus()
+        
+        # เงินทอน
+        change_label = ctk.CTkLabel(
+            dialog,
+            text="เงินทอน: ฿0.00",
+            font=("Sarabun", 20, "bold"),
+            text_color=COLORS["info"]
+        )
+        change_label.pack(pady=20)
+        
+        def calculate_change(*args):
+            try:
+                paid_val = paid_entry.get().strip()
+                if not paid_val:
+                    paid = 0
+                else:
+                    paid = float(paid_val)
+                    
+                change = paid - total
+                if change < 0:
+                    change_label.configure(
+                        text=f"ยังขาดอีก: ฿{abs(change):,.2f}",
+                        text_color=COLORS["danger"]
+                    )
+                else:
+                    change_label.configure(
+                        text=f"เงินทอน: ฿{change:,.2f}",
+                        text_color=COLORS["success"]
+                    )
+                
+                # อัพเดทที่หน้าจอหลัก
+                self.last_payment_frame.pack(fill="x", padx=15, pady=(0, 10))
+                self.last_paid_label.configure(text=f"฿{paid:,.2f}")
+                self.last_change_label.configure(text=f"฿{max(0, change):,.2f}")
+                
+                # อัพเดทที่จอลูกค้า
+                self.update_customer_display(paid=paid, change=change)
+            except:
+                change_label.configure(text="เงินทอน: ฿0.00")
+        
+        paid_entry.bind("<KeyRelease>", calculate_change)
+        # เรียกครั้งแรกเพื่ออัพเดทจอ
+        calculate_change()
+        
+        # ปุ่ม
+        btn_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=50, pady=30)
+        
+        cancel_btn = ctk.CTkButton(
+            btn_frame,
+            text="ยกเลิก",
+            font=FONTS["button"],
+            width=150,
+            height=50,
+            fg_color=COLORS["danger"],
+            command=dialog.destroy
+        )
+        cancel_btn.pack(side="left", padx=10)
+        
+        def do_payment(event=None):
+            self.process_payment(
+                dialog, total, subtotal, discount_amount, 
+                tax_amount, paid_entry.get()
+            )
+
+        confirm_btn = ctk.CTkButton(
+            btn_frame,
+            text="ยืนยันชำระเงิน",
+            font=FONTS["button"],
+            width=250,
+            height=50,
+            fg_color=COLORS["success"],
+            command=do_payment
+        )
+        confirm_btn.pack(side="right", padx=10)
+        
+        # ผูกปุ่ม Enter ให้ชำระเงินทันที
+        paid_entry.bind("<Return>", do_payment)
+        dialog.bind("<Return>", do_payment)
+    
+    def process_payment(self, dialog, total, subtotal, discount_amount, tax_amount, paid_str):
+        """ประมวลผลการชำระเงิน"""
+        try:
+            paid = float(paid_str)
+        except:
+            messagebox.showerror("ข้อผิดพลาด", "กรุณากรอกจำนวนเงินที่ถูกต้อง")
+            return
+        
+        if paid < total:
+            messagebox.showwarning("แจ้งเตือน", "จำนวนเงินไม่เพียงพอ")
+            return
+        
+        change = paid - total
+        
+        # บันทึกการขาย (ใช้ Transaction เพื่อความปลอดภัยของข้อมูล)
+        self.db.connect()
+        self.db.begin_transaction()
+        
+        try:
+            sale_number = self.db.generate_sale_number()
+            sale_date = datetime.now().strftime(DB_DATETIME_FORMAT)
+            
+            # บันทึกข้อมูลหลัก
+            success = self.db.execute("""
+                INSERT INTO sales (
+                    sale_number, sale_date, user_id, price_type,
+                    subtotal, discount_type, discount_value, discount_amount,
+                    tax_amount, total_amount, paid_amount, change_amount,
+                    payment_method, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                sale_number, sale_date, self.user_id, self.price_type,
+                subtotal, self.discount_type_combo.get(), 
+                self.discount_entry.get(), discount_amount,
+                tax_amount, total, paid, change,
+                'cash', 'completed'
+            ))
+            
+            if not success:
+                raise Exception("ไม่สามารถบันทึกการขายได้")
+            
+            # ดึง sale_id
+            sale = self.db.fetch_one(
+                "SELECT sale_id FROM sales WHERE sale_number = ?",
+                (sale_number,)
+            )
+            sale_id = sale['sale_id']
+            
+            # บันทึกรายการสินค้า
+            for item in self.cart_items:
+                self.db.execute("""
+                    INSERT INTO sale_items (
+                        sale_id, product_id, product_name,
+                        quantity, unit_price, total_price
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    sale_id, item['product_id'], item['product_name'],
+                    item['quantity'], item['unit_price'], item['total']
+                ))
+                
+                # ตัดสต็อก
+                self.db.execute("""
+                    UPDATE products 
+                    SET stock_quantity = stock_quantity - ?
+                    WHERE product_id = ?
+                """, (item['quantity'], item['product_id']))
+                
+                # บันทึกการเคลื่อนไหวสต็อก
+                self.db.execute("""
+                    INSERT INTO stock_movements (
+                        product_id, movement_type, quantity,
+                        reference_id, reference_type, user_id, notes
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    item['product_id'], 'out', item['quantity'],
+                    sale_id, 'sale', self.user_id, f'ขาย {sale_number}'
+                ))
+            
+            # ทุกอย่างสำเร็จ — commit ทั้งหมด
+            self.db.commit_transaction()
+            self.db.disconnect()
+        except Exception as e:
+            # ล้มเหลว — rollback ทั้งหมด (ข้อมูลไม่เปลี่ยน)
+            self.db.rollback_transaction()
+            self.db.disconnect()
+            messagebox.showerror("ข้อผิดพลาด", f"ไม่สามารถบันทึกการขายได้:\n{e}")
+            return
+        
+        # บันทึกลงไฟล์ .txt (Backup)
+        self.slm.add_sale({
+            "sale_number": sale_number,
+            "total_amount": total,
+            "payment_method": "cash"
+        })
+        
+        # ปิดหน้าต่างชำระเงินทันที
+        dialog.destroy()
+        
+        # เตรียมข้อมูลสำหรับพิมพ์
+        receipt_data = {
+            'company': COMPANY_INFO,
+            'sale_number': sale_number,
+            'sale_date': sale_date,
+            'customer_name': 'ลูกค้าทั่วไป',
+            'cashier': self.user_info['full_name'] if self.user_info else 'พนักงาน',
+            'items': [dict(item) for item in self.cart_items],
+            'subtotal': subtotal,
+            'discount_amount': discount_amount,
+            'tax_amount': tax_amount,
+            'total_amount': total,
+            'paid_amount': paid,
+            'change_amount': change
+        }
+            
+        # เช็คการตั้งค่าพิมพ์อัตโนมัติจากฐานข้อมูล
+        auto_print = False
+        try:
+            self.db.connect()
+            auto_print_setting = self.db.fetch_one("SELECT setting_value FROM settings WHERE setting_key = 'receipt_auto_print'")
+            self.db.disconnect()
+            if auto_print_setting:
+                auto_print = auto_print_setting['setting_value'] == 'True'
+        except Exception as e:
+            print(f"Error checking auto_print: {e}")
+            
+        if auto_print:
+            # พิมพ์ใบเสร็จทันที
+            try:
+                print_receipt(receipt_data)
+            except Exception as e:
+                print(f"Auto print error: {e}")
+            self.finalize_sale(paid, change)
+        else:
+            # ถามก่อนพิมพ์ (Popup)
+            self.show_print_confirmation(receipt_data, paid, change)
+
+    def show_print_confirmation(self, receipt_data, paid, change):
+        """แสดงหน้าต่างยืนยันการพิมพ์ใบเสร็จ"""
+        confirm_dialog = ctk.CTkToplevel(self)
+        confirm_dialog.title("พิมพ์ใบเสร็จ")
+        confirm_dialog.geometry("400x200")
+        
+        # ตั้งค่าให้เป็น Modal (อยู่บนสุดและบล็อคหน้าหลัง)
+        confirm_dialog.transient(self)
+        confirm_dialog.grab_set()
+        confirm_dialog.attributes("-topmost", True)
+        
+        # จัดกึ่งกลางหน้าจอ (ประมาณการ)
+        try:
+            x = self.winfo_x() + (self.winfo_width() // 2) - 200
+            y = self.winfo_y() + (self.winfo_height() // 2) - 100
+            confirm_dialog.geometry(f"+{x}+{y}")
+        except:
+            pass # Fallback to default position
+        
+        # ข้อความ
+        msg = ctk.CTkLabel(
+            confirm_dialog, 
+            text="ชำระเงินเสร็จสิ้น!\nต้องการพิมพ์ใบเสร็จหรือไม่?", 
+            font=("Sarabun", 20, "bold"),
+            text_color=COLORS["success"]
+        )
+        msg.pack(pady=(30, 20))
+        
+        btn_frame = ctk.CTkFrame(confirm_dialog, fg_color="transparent")
+        btn_frame.pack(pady=10)
+        
+        def on_print(event=None):
+            try:
+                if not print_receipt(receipt_data):
+                    messagebox.showerror("Error", "พิมพ์ไม่สำเร็จ")
+            except Exception as e:
+                messagebox.showerror("Error", str(e))
+            cleanup()
+            
+        def on_cancel(event=None):
+            cleanup()
+            
+        def cleanup():
+            confirm_dialog.destroy()
+            self.finalize_sale(paid, change)
+            
+        # ปุ่ม
+        btn_yes = ctk.CTkButton(
+            btn_frame, 
+            text="พิมพ์ (Enter)", 
+            command=on_print, 
+            fg_color=COLORS["success"],
+            width=120,
+            height=40,
+            font=FONTS["button"]
+        )
+        btn_yes.pack(side="left", padx=10)
+        
+        btn_no = ctk.CTkButton(
+            btn_frame, 
+            text="ไม่พิมพ์ (Esc)", 
+            command=on_cancel, 
+            fg_color=COLORS["danger"],
+            width=120,
+            height=40,
+            font=FONTS["button"]
+        )
+        btn_no.pack(side="left", padx=10)
+        
+        # Bindings
+        confirm_dialog.bind("<Return>", on_print)
+        confirm_dialog.bind("<KP_Enter>", on_print)
+        confirm_dialog.bind("<Escape>", on_cancel)
+        
+        # Focus ที่ปุ่มพิมพ์
+        btn_yes.focus()
+
+    def finalize_sale(self, paid, change):
+        """เคลียร์หน้าจอหลังขายจบ"""
+        # ล้างตะกร้า (ใช้ .clear() เพื่อรักษา reference ของ session — BUG-009)
+        self.cart_items.clear()
+        self.update_cart_display()
+        self.update_summary()
+        self.update_tabs_ui()  # อัปเดตจำนวนสินค้าบน tab
+        self.update_customer_display(paid=paid, change=change)  # อัพเดทจอลูกค้า (แสดงเงินทอน)
+        
+        # Clear cache เมื่อมีการขาย (เพื่อให้สต็อกอัพเดท)
+        self._products_cache.clear()
+        
+        # เปิดลิ้นชักเงินสด (Cash Drawer Kick)
+        if SALE_SETTINGS.get("open_cash_drawer", False):
+            try:
+                kick_cash_drawer()
+            except Exception as e:
+                print(f"Cash drawer kick error (non-critical): {e}")
+        
+        # Focus กลับไปที่ช่องค้นหา
+        self.search_entry.focus()
+    
+    def load_autocomplete_data(self):
+        """โหลดข้อมูลสินค้าสำหรับ autocomplete (ครั้งเดียวตอน init)"""
+        try:
+            self.db.connect()
+            products = self.db.fetch_all("""
+                SELECT product_id, product_name, barcode
+                FROM products 
+                WHERE is_active = 1
+                ORDER BY product_name
+                LIMIT 500
+            """)
+            self.db.disconnect()
+            
+            # เก็บเฉพาะชื่อและบาร์โค้ดสำหรับ autocomplete
+            self._autocomplete_data = [
+                {'text': p['product_name'], 'id': p['product_id']}
+                for p in products
+            ] + [
+                {'text': p['barcode'], 'id': p['product_id']}
+                for p in products if p['barcode']
+            ]
+        except Exception as e:
+            print(f"[WARN] Failed to load autocomplete data: {e}")
+            self._autocomplete_data = []
+    
+    def setup_keyboard_shortcuts(self):
+        """ตั้งค่า keyboard shortcuts"""
+        # Global Binding - ผูกกับหน้าต่างหลักโดยตรง (Hardtest)
+        parent_window = self.winfo_toplevel()
+        
+        # F1: Focus ช่องค้นหา
+        parent_window.bind("<F1>", lambda e: self.search_entry.focus())
+        
+        # F10: ชำระเงิน (จำเป็นต่อการใช้งาน)
+        # ตรวจสอบว่าหน้าต่างยังเปิดอยู่และมีสินค้าในตะกร้า
+        def on_f10(event):
+            if self.winfo_exists() and self.cart_items:
+                self.show_checkout_dialog()
+            return "break" # ป้องกัน event propagation
+            
+        parent_window.bind("<F10>", on_f10)
+        
+        # F11: ยกเลิกการขาย (ล้างตะกร้า)
+        def on_f11(event):
+            if self.winfo_exists():
+                self.clear_cart()
+            return "break"
+        parent_window.bind("<F11>", on_f11)
+
+        # F9: ขึ้นหน้าการขายใหม่ (New Session)
+        def on_f9(event):
+            if self.winfo_exists():
+                self.add_new_session()
+            return "break"
+        parent_window.bind("<F9>", on_f9)
+
+        # F7: เปิดหน้าพิมพ์ส่วนลด (Focus ช่องส่วนลด)
+        def on_f7(event):
+            if self.winfo_exists() and hasattr(self, 'discount_entry'):
+                self.discount_entry.focus()
+                self.discount_entry.select_range(0, 'end')
+            return "break"
+        parent_window.bind("<F7>", on_f7)
+
+        # F8: เปิด/ปิด VAT และกรอกเปอร์เซ็นต์
+        def on_f8(event):
+            if self.winfo_exists() and hasattr(self, 'vat_checkbox'):
+                # Toggle checkbox
+                if self.vat_checkbox.get():
+                    self.vat_checkbox.deselect()
+                else:
+                    self.vat_checkbox.select()
+                self.toggle_vat()
+                
+                # Focus ช่องกรอก VAT
+                self.vat_entry.focus()
+                self.vat_entry.select_range(0, 'end')
+            return "break"
+        parent_window.bind("<F8>", on_f8)
+        
+        # F12: ลบหน้าการขายปัจจุบัน (Close Current Session)
+        def on_f12(event):
+            if self.winfo_exists():
+                self.remove_session(self.active_session_index)
+            return "break"
+        parent_window.bind("<F12>", on_f12)
+        
+        # Also bind entries to prevent default behavior if needed
+        for entry in [self.search_entry]:
+            entry.bind("<F10>", on_f10)
+            entry.bind("<F11>", on_f11)
+            entry.bind("<F9>", on_f9)
+            entry.bind("<F7>", on_f7)
+            entry.bind("<F8>", on_f8)
+            entry.bind("<F12>", on_f12)
+            
+        # ทำให้ frame focus ได้
+        self.focus_set()
+    
+    def remove_last_item(self):
+        """ลบรายการล่าสุดในตะกร้า (Shortcut: Ctrl+Q)"""
+        if self.cart_items:
+            removed = self.cart_items.pop()
+            self.update_cart_display()
+            self.update_summary()
+            self.update_customer_display()  # อัพเดทจอลูกค้า
+            print(f"ลบ: {removed['product_name']}")
+    
+    def toggle_customer_display(self):
+        """เปิด/ปิดจอแสดงผลลูกค้า"""
+        try:
+            from ui.customer_display import CustomerDisplayWindow
+            
+            if self.customer_display is None or not self.customer_display.winfo_exists():
+                # เปิดจอลูกค้า
+                self.customer_display = CustomerDisplayWindow(self)
+                self.display_btn.configure(
+                    text="📺 ปิดจอลูกค้า",
+                    fg_color=COLORS["danger"]
+                )
+                self.update_customer_display()
+            else:
+                # ปิดจอลูกค้า
+                self.customer_display.destroy()
+                self.customer_display = None
+                self.display_btn.configure(
+                    text="📺 เปิดจอลูกค้า",
+                    fg_color=COLORS["info"]
+                )
+        except Exception as e:
+            messagebox.showerror("ข้อผิดพลาด", f"ไม่สามารถเปิดจอลูกค้าได้: {e}")
+    
+    def update_customer_display(self, paid=0, change=0):
+        """อัพเดทข้อมูลบนจอลูกค้า (Real-time)"""
+        if self.customer_display and self.customer_display.winfo_exists():
+            try:
+                # เตรียมข้อมูลรายการสินค้า
+                cart_items = []
+                for item in self.cart_items:
+                    cart_items.append({
+                        "name": item['product_name'],
+                        "quantity": item['quantity'],
+                        "price": item['unit_price'],
+                        "total": item['total'],
+                        "image_path": item.get('image_path') # item is a standard dict here, .get() is fine
+                    })
+                
+                # คำนวณยอดรวมตาม VAT settings
+                subtotal = sum(item['total'] for item in self.cart_items)
+                
+                # ส่วนลด
+                try:
+                    discount_value = float(self.discount_entry.get())
+                except:
+                    discount_value = 0
+                
+                discount_type = self.discount_type_combo.get()
+                if discount_type == "%":
+                    discount_amount = (subtotal * discount_value) / 100
+                else:
+                    discount_amount = discount_value
+                
+                after_discount = subtotal - discount_amount
+                if after_discount < 0:
+                    after_discount = 0
+                
+                # VAT
+                if self.vat_enabled:
+                    tax_amount = after_discount * self.vat_rate
+                else:
+                    tax_amount = 0
+                
+                total = after_discount + tax_amount
+                
+                # สร้าง QR Code (PromptPay)
+                qr_data = f"PromptPay:0812345678:Amount:{total:.2f}"
+                
+                # อัพเดทจอแบบ Real-time
+                self.customer_display.update_display(cart_items, total, qr_data, paid=paid, change=change)
+            except Exception as e:
+                print(f"Error updating customer display: {e}")
+    
+    def toggle_vat(self):
+        """เปิด/ปิด VAT"""
+        self.vat_enabled = self.vat_checkbox.get()
+        
+        # อัพเดท label
+        if self.vat_enabled:
+            self.vat_label_text.configure(text=f"ภาษี VAT")
+        else:
+            self.vat_label_text.configure(text=f"ภาษี VAT (ปิด)")
+        
+        # คำนวณใหม่
+        self.update_summary()
+        self.update_customer_display()  # อัพเดทจอลูกค้า
+    
+    def update_vat_rate(self):
+        """อัพเดทอัตรา VAT จากช่องกรอก"""
+        try:
+            vat_percent = float(self.vat_entry.get())
+            if 0 <= vat_percent <= 100:
+                self.vat_rate = vat_percent / 100
+                self.vat_label_text.configure(text=f"ภาษี VAT")
+                self.update_summary()
+                self.update_customer_display()  # อัพเดทจอลูกค้า
+            else:
+                # ถ้าเกิน 100 ให้รีเซ็ต
+                self.vat_entry.delete(0, 'end')
+                self.vat_entry.insert(0, str(int(self.vat_rate * 100)))
+        except Exception:
+            # ถ้ากรอกไม่ใช่ตัวเลข
+            pass
