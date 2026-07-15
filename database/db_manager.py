@@ -45,8 +45,46 @@ class DatabaseManager:
             if not self.cursor.fetchone():
                 log_info("Database tables missing. Auto-initializing database...")
                 self.initialize_database()
+                
+            # เฝ้าระวังความถูกต้องของเครื่องพิมพ์ XP-58 (copy 1) ให้เป็นโหมด windows (GDI) และ 58mm เสมอ ป้องกันการพิมพ์มั่ว
+            self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='settings'")
+            if self.cursor.fetchone():
+                self.cursor.execute("SELECT setting_value FROM settings WHERE setting_key = 'printer_name'")
+                p_name_row = self.cursor.fetchone()
+                if p_name_row:
+                    p_name = p_name_row[0] or ""
+                    if "XP-58" in p_name:
+                        self.cursor.execute("SELECT setting_value FROM settings WHERE setting_key = 'printer_type'")
+                        p_type_row = self.cursor.fetchone()
+                        
+                        self.cursor.execute("SELECT setting_value FROM settings WHERE setting_key = 'paper_size'")
+                        p_size_row = self.cursor.fetchone()
+                        
+                        need_update = False
+                        p_type = p_type_row[0] if p_type_row else ""
+                        p_size = p_size_row[0] if p_size_row else ""
+                        
+                        if p_type != "windows":
+                            need_update = True
+                            p_type = "windows"
+                        if p_size != "58mm":
+                            need_update = True
+                            p_size = "58mm"
+                            
+                        if need_update:
+                            log_info(f"Enforcing correct printer settings for {p_name}: GDI mode (windows) and 58mm.")
+                            self.cursor.execute(
+                                "INSERT OR REPLACE INTO settings (setting_key, setting_value) VALUES ('printer_type', ?)",
+                                (p_type,)
+                            )
+                            self.cursor.execute(
+                                "INSERT OR REPLACE INTO settings (setting_key, setting_value) VALUES ('paper_size', ?)",
+                                (p_size,)
+                            )
+                            if not self._in_transaction:
+                                self.connection.commit()
         except Exception as e:
-            log_error(f"Error auto-initializing database: {e}")
+            log_error(f"Error auto-initializing database or checking printer settings: {e}")
         
     def connect(self):
         """เชื่อมต่อฐานข้อมูล - ดึง connection จาก pool หรือสร้างใหม่"""
