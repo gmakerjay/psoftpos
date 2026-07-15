@@ -554,7 +554,7 @@ class PrinterManager:
             page_width = int((print_width_mm / 25.4) * dpi_x)
             
             # สร้างฟอนต์
-            font_name = "FC Sara Samkan"
+            font_name = "Tahoma"
             font_title = win32ui.CreateFont({
                 'name': font_name,
                 'height': int(title_sz * dpi_y / 72),

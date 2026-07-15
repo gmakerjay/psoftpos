@@ -927,6 +927,17 @@ class SettingsFrame(ctk.CTkFrame):
             type(self.db).close_all_connections()
             from config import DATABASE_PATH
             
+            # ลบไฟล์ WAL และ SHM เพื่อป้องกันฐานข้อมูลพังจากการกู้คืนในโหมด WAL (WAL corruption)
+            try:
+                db_wal = Path(DATABASE_PATH).with_name(Path(DATABASE_PATH).name + "-wal")
+                db_shm = Path(DATABASE_PATH).with_name(Path(DATABASE_PATH).name + "-shm")
+                if db_wal.exists():
+                    db_wal.unlink()
+                if db_shm.exists():
+                    db_shm.unlink()
+            except Exception as e:
+                print(f"Error removing WAL/SHM files during restore: {e}")
+            
             # รองรับทั้ง backup แบบใหม่ (database.db) และแบบเก่า (sales.db)
             if (temp_dir / "database.db").exists():
                 shutil.copy(temp_dir / "database.db", DATABASE_PATH)

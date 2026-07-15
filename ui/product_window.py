@@ -535,15 +535,37 @@ class ProductManagementFrame(ctk.CTkFrame):
             content, font=("Sarabun", 20), height=50,
             placeholder_text="สแกนบาร์โค้ดหรือพิมพ์ที่นี่..."
         )
-        entry.pack(fill="x", padx=30, pady=(30, 10))
+        entry.pack(fill="x", padx=30, pady=(20, 5))
 
         # บังคับ EN input สำหรับปืนบาร์โค้ดทุกรุ่น
         bind_english_input(entry)
+
+        # พรีวิวแถบบาร์โค้ด
+        barcode_preview_lbl = ctk.CTkLabel(content, text="")
+        barcode_preview_lbl.pack(fill="x", padx=30, pady=(5, 10))
+
+        def update_barcode_preview(event=None):
+            val = entry.get().strip()
+            if not val or len(val) < 3:
+                barcode_preview_lbl.configure(image=None, text="กรอกหรือสร้างบาร์โค้ดเพื่อแสดงแถบพรีวิว")
+                return
+            try:
+                img = create_barcode(val)
+                if img:
+                    img.thumbnail((300, 50), Image.Resampling.NEAREST)
+                    photo = ImageTk.PhotoImage(img)
+                    barcode_preview_lbl.configure(image=photo, text="")
+                    barcode_preview_lbl.image = photo # Keep reference
+                else:
+                    barcode_preview_lbl.configure(image=None, text="รูปแบบบาร์โค้ดไม่ถูกต้อง")
+            except Exception as e:
+                barcode_preview_lbl.configure(image=None, text=f"เกิดข้อผิดพลาด: {e}")
 
         # ปุ่มสร้างอัตโนมัติ
         def auto_gen():
             entry.delete(0, "end")
             entry.insert(0, generate_product_barcode())
+            update_barcode_preview()
 
         btn_frame = ctk.CTkFrame(content, fg_color="transparent")
         btn_frame.pack(fill="x", padx=30, pady=(0, 10))
@@ -569,8 +591,10 @@ class ProductManagementFrame(ctk.CTkFrame):
             self._wizard_step_name()
 
         entry.bind("<Return>", lambda e: go_next())
+        entry.bind("<KeyRelease>", update_barcode_preview)
 
-        # Auto-focus ที่ช่องกรอก
+        # อัปเดทและโฟกัสเริ่มต้น
+        update_barcode_preview()
         dialog.after(100, entry.focus_set)
 
     # ---------- Step 2: ชื่อสินค้า ----------
@@ -819,11 +843,37 @@ class ProductManagementFrame(ctk.CTkFrame):
         # บังคับ EN input สำหรับปืนบาร์โค้ดทุกรุ่น
         bind_english_input(barcode_entry)
         
+        # พื้นที่แสดงผลพรีวิวแถบบาร์โค้ด
+        barcode_preview_lbl = ctk.CTkLabel(info_frame, text="")
+        barcode_preview_lbl.pack(fill="x", padx=20, pady=(0, 10))
+        
+        def update_barcode_preview(event=None):
+            val = barcode_entry.get().strip()
+            if not val or len(val) < 3:
+                barcode_preview_lbl.configure(image=None, text="กรอกหรือสร้างบาร์โค้ดเพื่อแสดงแถบพรีวิว")
+                return
+            try:
+                img = create_barcode(val)
+                if img:
+                    img.thumbnail((300, 50), Image.Resampling.NEAREST)
+                    photo = ImageTk.PhotoImage(img)
+                    barcode_preview_lbl.configure(image=photo, text="")
+                    barcode_preview_lbl.image = photo # Keep reference
+                else:
+                    barcode_preview_lbl.configure(image=None, text="รูปแบบบาร์โค้ดไม่ถูกต้อง")
+            except Exception as e:
+                barcode_preview_lbl.configure(image=None, text=f"เกิดข้อผิดพลาด: {e}")
+                
         def auto_barcode():
             barcode_entry.delete(0, 'end')
             barcode_entry.insert(0, generate_product_barcode())
+            update_barcode_preview()
         
         ctk.CTkButton(barcode_inner, text="สร้างอัตโนมัติ", font=label_font, width=120, height=40, fg_color=COLORS["secondary"], command=auto_barcode).pack(side="right")
+        
+        # แสดงพรีวิวเริ่มต้นเมื่อหน้าต่างโหลดขึ้นมาและเชื่อมต่ออีเวนต์
+        barcode_entry.bind("<KeyRelease>", update_barcode_preview)
+        update_barcode_preview()
         
         # ชื่อสินค้า
         ctk.CTkLabel(info_frame, text="ชื่อสินค้า: *", font=label_font).pack(anchor="w", padx=20, pady=(10, 0))
