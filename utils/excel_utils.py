@@ -88,9 +88,10 @@ class ExcelManager:
                         cell.border = border
             
             # ปรับความกว้างคอลัมน์
+            from openpyxl.utils import get_column_letter
             for column in ws.columns:
                 max_length = 0
-                column_letter = column[0].column_letter
+                column_letter = get_column_letter(column[0].column)
                 for cell in column:
                     try:
                         if len(str(cell.value)) > max_length:
