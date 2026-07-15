@@ -1392,22 +1392,23 @@ class ProductManagementFrame(ctk.CTkFrame):
                 "บาร์โค้ด", "ชื่อสินค้า", "หมวดหมู่",
                 "ราคาทุน", "ราคาขายปกติ", "ราคาขายส่ง",
                 "ราคาพิเศษ1", "ราคาพิเศษ2",
-                "จำนวนสต็อก", "สต็อกขั้นต่ำ"
+                "จำนวนสต็อก", "สต็อกขั้นต่ำ", "หน่วย"
             ]
 
             export_data = []
             for p in products:
                 export_data.append({
-                    "บาร์โค้ด": str(p.get("barcode", "") or "").strip(),
-                    "ชื่อสินค้า": str(p.get("product_name", "") or "").strip(),
-                    "หมวดหมู่": str(p.get("category_name", "") or "").strip(),
-                    "ราคาทุน": float(p.get("cost_price", 0.0) or 0.0),
-                    "ราคาขายปกติ": float(p.get("retail_price", 0.0) or 0.0),
-                    "ราคาขายส่ง": float(p.get("wholesale_price", 0.0) or 0.0),
-                    "ราคาพิเศษ1": float(p.get("special_price1", 0.0) or 0.0),
-                    "ราคาพิเศษ2": float(p.get("special_price2", 0.0) or 0.0),
-                    "จำนวนสต็อก": int(p.get("stock_quantity", 0) or 0),
-                    "สต็อกขั้นต่ำ": int(p.get("min_stock", 10) or 10)
+                    "บาร์โค้ด": str(p["barcode"] or "").strip(),
+                    "ชื่อสินค้า": str(p["product_name"] or "").strip(),
+                    "หมวดหมู่": str(p["category_name"] or "").strip(),
+                    "ราคาทุน": float(p["cost_price"] or 0.0),
+                    "ราคาขายปกติ": float(p["retail_price"] or 0.0),
+                    "ราคาขายส่ง": float(p["wholesale_price"] or 0.0),
+                    "ราคาพิเศษ1": float(p["special_price1"] or 0.0),
+                    "ราคาพิเศษ2": float(p["special_price2"] or 0.0),
+                    "จำนวนสต็อก": int(p["stock_quantity"] or 0),
+                    "สต็อกขั้นต่ำ": int(p["min_stock"] or 10),
+                    "หน่วย": str(p["unit"] or "ชิ้น").strip()
                 })
 
             success = ExcelManager.export_to_excel(
