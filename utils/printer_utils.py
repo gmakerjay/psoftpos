@@ -152,11 +152,10 @@ class PrinterManager:
         FS = b'\x1c'
         commands = [
             ESC + b'@',            # Hardware reset — clear all buffers and modes
-            FS + b'.',             # Cancel Chinese character mode (方式1)
-            FS + b'&',             # Select single-byte character mode (方式2 — สำคัญสำหรับเครื่องจีน)
+            FS + b'.',             # Cancel Chinese character mode (Kanji Mode Off)
             ESC + b't\x1a',        # Select character code table 26 = CP874 (Thai)
             ESC + b'R\x00',        # Select international character set 0 (USA — base ASCII)
-        ]  # Init + Cancel Chinese + Force single-byte + Select Thai CP874
+        ]  # Init + Cancel Chinese + Select Thai CP874
         width = 32 if self.paper_size == "58mm" else 48
         
         # ดึงการตั้งค่าล่าสุดจาก Database เสมอ เพื่อการันตีว่าค่าที่บันทึกส่งผลจริงทันที 100%
