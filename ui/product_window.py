@@ -1509,15 +1509,13 @@ class ProductManagementFrame(ctk.CTkFrame):
                     if barcode:
                         barcode = str(barcode).strip().replace('.0', '')  # pandas อาจอ่านเป็น float
 
-                    # เช็คบาร์โค้ดซ้ำ
+                    # เช็คบาร์โค้ดซ้ำ (เช็คแบบ Global ทั้งหมดไม่เกี่ยวกับ is_active เพื่อหลีกเลี่ยง UNIQUE Constraint Failed)
+                    existing = None
                     if barcode:
                         existing = self.db.fetch_one(
-                            "SELECT product_id FROM products WHERE barcode = ? AND is_active = 1",
+                            "SELECT product_id, is_active FROM products WHERE barcode = ?",
                             (barcode,)
                         )
-                        if existing:
-                            skipped_count += 1
-                            continue
 
                     # จัดการหมวดหมู่ — สร้างอัตโนมัติถ้าไม่มี
                     category_id = None
@@ -1560,21 +1558,52 @@ class ProductManagementFrame(ctk.CTkFrame):
                     special_price2 = to_float(mapped.get("special_price2"))
                     stock_qty = to_int(mapped.get("stock_quantity"))
                     min_stock = to_int(mapped.get("min_stock"), 10)
+                    unit = str(mapped.get("unit") or "ชิ้น").strip()
 
-                    # INSERT สินค้า
-                    result = self.db.execute("""
-                        INSERT INTO products (
+                    # ตัดสินใจอัปเดต กู้คืน หรือ เพิ่มสินค้าใหม่
+                    if existing:
+                        if existing["is_active"] == 1:
+                            # ซ้ำและยังเปิดใช้งานอยู่ -> ข้ามตามกติกา
+                            skipped_count += 1
+                            continue
+                        else:
+                            # ซ้ำแต่เคยถูกลบไปแล้ว (is_active = 0) -> ทำการกู้คืน (Reactivate) และอัปเดตข้อมูลใหม่เพื่อไม่ให้ติด UNIQUE constraint
+                            result = self.db.execute("""
+                                UPDATE products SET
+                                    product_name = ?,
+                                    category_id = ?,
+                                    cost_price = ?,
+                                    retail_price = ?,
+                                    wholesale_price = ?,
+                                    special_price1 = ?,
+                                    special_price2 = ?,
+                                    stock_quantity = ?,
+                                    min_stock = ?,
+                                    unit = ?,
+                                    is_active = 1
+                                WHERE product_id = ?
+                            """, (
+                                product_name, category_id,
+                                cost_price, retail_price, wholesale_price,
+                                special_price1, special_price2,
+                                stock_qty, min_stock, unit,
+                                existing["product_id"]
+                            ))
+                    else:
+                        # ไม่ซ้ำเลย -> เพิ่มสินค้าใหม่
+                        result = self.db.execute("""
+                            INSERT INTO products (
+                                barcode, product_name, category_id,
+                                cost_price, retail_price, wholesale_price,
+                                special_price1, special_price2,
+                                stock_quantity, min_stock, unit, is_active
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                        """, (
                             barcode, product_name, category_id,
                             cost_price, retail_price, wholesale_price,
                             special_price1, special_price2,
-                            stock_quantity, min_stock, is_active
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-                    """, (
-                        barcode, product_name, category_id,
-                        cost_price, retail_price, wholesale_price,
-                        special_price1, special_price2,
-                        stock_qty, min_stock
-                    ))
+                            stock_qty, min_stock, unit
+                        ))
 
                     if result:
                         success_count += 1
