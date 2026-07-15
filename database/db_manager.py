@@ -37,19 +37,33 @@ class DatabaseManager:
         except ImportError:
             pass
         self._in_transaction = False  # ติดตามสถานะ transaction
+
+    def _check_and_auto_init(self):
+        """ตรวจสอบและสร้างตารางฐานข้อมูลอัตโนมัติหากยังไม่มี เพื่อป้องกันปัญหา no such table"""
+        try:
+            self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+            if not self.cursor.fetchone():
+                log_info("Database tables missing. Auto-initializing database...")
+                self.initialize_database()
+        except Exception as e:
+            log_error(f"Error auto-initializing database: {e}")
         
     def connect(self):
-        """เชื่อมต่อฐานข้อมูล - Optimized with connection pooling"""
+        """เชื่อมต่อฐานข้อมูล - ดึง connection จาก pool หรือสร้างใหม่"""
+        if self.connection and self.cursor:
+            return True
+            
         try:
             if self._use_pool:
                 with self._pool_lock:
-                    # ลองหา connection ว่างจาก pool
+                    # ค้นหา connection ที่ไม่ได้ใช้งาน
                     for conn_id, conn_info in self._connection_pool.items():
                         if not conn_info['in_use']:
                             conn_info['in_use'] = True
                             self.connection = conn_info['connection']
                             self.connection.row_factory = sqlite3.Row
                             self.cursor = self.connection.cursor()
+                            self._check_and_auto_init()
                             return True
                     
                     # ถ้า pool ยังไม่เต็ม สร้าง connection ใหม่
@@ -70,12 +84,14 @@ class DatabaseManager:
                         }
                         self.connection = conn
                         self.cursor = conn.cursor()
+                        self._check_and_auto_init()
                         return True
             
             # Fallback: สร้าง connection ปกติ
             self.connection = sqlite3.connect(self.db_path)
             self.connection.row_factory = sqlite3.Row
             self.cursor = self.connection.cursor()
+            self._check_and_auto_init()
             return True
         except sqlite3.Error as e:
             log_error(f"Error connecting to database: {e}", exc_info=True)
