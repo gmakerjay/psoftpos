@@ -517,6 +517,37 @@ class SettingsFrame(ctk.CTkFrame):
         )
         paper_combo.pack(side="left")
         
+        # รหัสภาษาไทยเครื่องพิมพ์ (Thai Code Page)
+        codepage_frame = ctk.CTkFrame(content, fg_color=COLORS["light"], corner_radius=10)
+        codepage_frame.pack(fill="x", padx=20, pady=(0, 20))
+        
+        ctk.CTkLabel(
+            codepage_frame,
+            text="🇹🇭 รหัสภาษาไทยเครื่องพิมพ์ (สำหรับโหมด Thermal)",
+            font=FONTS["heading"],
+            text_color=COLORS["primary"]
+        ).pack(padx=20, pady=(20, 10))
+        
+        codepage_row = ctk.CTkFrame(codepage_frame, fg_color="transparent")
+        codepage_row.pack(fill="x", padx=20, pady=(0, 20))
+        
+        self.printer_codepage_var = ctk.StringVar(value="18 (Xprinter, เครื่องจีนส่วนใหญ่)")
+        codepage_combo = ctk.CTkComboBox(
+            codepage_row,
+            values=[
+                "18 (Xprinter, เครื่องจีนส่วนใหญ่)",
+                "26 (Epson, เครื่องศูนย์ไทย)",
+                "255 (เครื่องนำเข้าทั่วไป)",
+                "254 (เครื่อง OEM จีน)",
+                "252 (เครื่อง OEM ไทย)",
+                "30 (เครื่อง Star, เครื่องบางยี่ห้อ)"
+            ],
+            variable=self.printer_codepage_var,
+            width=300,
+            font=FONTS["body"]
+        )
+        codepage_combo.pack(side="left")
+        
         # โหลดเครื่องพิมพ์ตอน init
         self.load_available_printers()
         

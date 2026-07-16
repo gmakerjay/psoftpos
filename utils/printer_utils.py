@@ -153,9 +153,10 @@ class PrinterManager:
         commands = [
             ESC + b'@',            # Hardware reset — clear all buffers and modes
             FS + b'.',             # Cancel Chinese character mode (Kanji Mode Off)
-            ESC + b't\x12',        # Select character code table 18 = CP874 (Thai - TIS620 standard for Xprinter/Chinese printers)
+            ESC + b't\xff',        # Select character code table 255 = CP874 (Common Thai page for Xprinter/Chinese OEM)
+            FS + b'C\x01',         # Select Thai TIS-620 font mode (FS C \x01)
             ESC + b'R\x00',        # Select international character set 0 (USA — base ASCII)
-        ]  # Init + Cancel Chinese + Select Thai CP874
+        ]  # Init + Cancel Chinese + Select Thai CP874 + Enable Thai Font Mode
         width = 32 if self.paper_size == "58mm" else 48
         
         # ดึงการตั้งค่าล่าสุดจาก Database เสมอ เพื่อการันตีว่าค่าที่บันทึกส่งผลจริงทันที 100%
