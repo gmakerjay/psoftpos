@@ -472,6 +472,16 @@ class SettingsFrame(ctk.CTkFrame):
         printer_select_row.pack(fill="x", padx=20, pady=(0, 20))
         
         self.printer_name_var = ctk.StringVar(value="")
+        
+        # แนะนำการตั้งค่าที่ถูกต้องสำหรับเครื่องพิมพ์ตระกูล XP-58 (GDI) ทันทีบนหน้าจอเมื่อทำการเลือก
+        def on_printer_name_change(*args):
+            p_name = self.printer_name_var.get()
+            if p_name and "XP-58" in p_name:
+                self.printer_type_var.set("windows")
+                self.paper_size_var.set("58mm")
+                
+        self.printer_name_var.trace_add("write", on_printer_name_change)
+        
         self.printer_combo = ctk.CTkComboBox(
             printer_select_row,
             values=["กำลังโหลด..."],
