@@ -473,21 +473,13 @@ class SettingsFrame(ctk.CTkFrame):
         
         self.printer_name_var = ctk.StringVar(value="")
         
-        # แนะนำการตั้งค่าที่ถูกต้องสำหรับเครื่องพิมพ์ตระกูล XP-58 (GDI) ทันทีบนหน้าจอเมื่อทำการเลือก
-        def on_printer_name_change(*args):
-            p_name = self.printer_name_var.get()
-            if p_name and "XP-58" in p_name:
-                self.printer_type_var.set("windows")
-                self.paper_size_var.set("58mm")
-                
-        self.printer_name_var.trace_add("write", on_printer_name_change)
-        
         self.printer_combo = ctk.CTkComboBox(
             printer_select_row,
             values=["กำลังโหลด..."],
             variable=self.printer_name_var,
             width=300,
-            font=FONTS["body"]
+            font=FONTS["body"],
+            command=self.on_printer_select
         )
         self.printer_combo.pack(side="left", padx=(0, 10))
         
@@ -777,7 +769,13 @@ class SettingsFrame(ctk.CTkFrame):
         load_config_from_db()
         
         messagebox.showinfo("สำเร็จ", "บันทึกการตั้งค่าเครื่องพิมพ์สำเร็จ!")
-    
+        
+    def on_printer_select(self, printer_name):
+        """แนะนำการตั้งค่า GDI (windows) และ 58mm ทันทีเมื่อเลือกเครื่องพิมพ์ตระกูล XP-58 ใน UI ด้วยตนเอง"""
+        if printer_name and "XP-58" in printer_name:
+            self.printer_type_var.set("windows")
+            self.paper_size_var.set("58mm")
+            
     def load_available_printers(self):
         """โหลดรายชื่อเครื่องพิมพ์ที่มีในระบบ"""
         try:
