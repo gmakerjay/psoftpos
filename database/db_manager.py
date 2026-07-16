@@ -479,20 +479,26 @@ class DatabaseManager:
         return True
         
     def _create_default_admin(self):
-        """สร้างผู้ใช้ admin เริ่มต้น"""
-        # ตรวจสอบว่ามี admin หรือยัง
+        """สร้างผู้ใช้เริ่มต้น (admin + cashier)"""
+        # สร้าง admin ถ้ายังไม่มี
         result = self.fetch_one("SELECT user_id FROM users WHERE username = ?", ("admin",))
-        if result:
-            return
-            
-        # สร้าง password hash
-        password = "admin"
-        password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        if not result:
+            password = "psoft123"
+            password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            self.execute("""
+                INSERT INTO users (username, password_hash, full_name, role, is_active)
+                VALUES (?, ?, ?, ?, ?)
+            """, ("admin", password_hash, "ผู้ดูแลระบบ", "admin", 1))
         
-        self.execute("""
-            INSERT INTO users (username, password_hash, full_name, role, is_active)
-            VALUES (?, ?, ?, ?, ?)
-        """, ("admin", password_hash, "ผู้ดูแลระบบ", "admin", 1))
+        # สร้าง user (พนักงานขาย) ถ้ายังไม่มี
+        result = self.fetch_one("SELECT user_id FROM users WHERE username = ?", ("user",))
+        if not result:
+            password = "user123"
+            password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            self.execute("""
+                INSERT INTO users (username, password_hash, full_name, role, is_active)
+                VALUES (?, ?, ?, ?, ?)
+            """, ("user", password_hash, "พนักงานขาย", "cashier", 1))
         
     def _create_default_categories(self):
         """สร้างหมวดหมู่เริ่มต้น"""

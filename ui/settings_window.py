@@ -867,7 +867,16 @@ class SettingsFrame(ctk.CTkFrame):
         
         try:
             import zipfile
+            import sqlite3
             from config import DATABASE_PATH
+            
+            # Flush WAL log เข้าไฟล์หลักก่อนสำรอง (ป้องกันข้อมูลล่าสุดหายจาก WAL mode)
+            try:
+                _bk_conn = sqlite3.connect(DATABASE_PATH)
+                _bk_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                _bk_conn.close()
+            except Exception:
+                pass  # ถ้า checkpoint ไม่ได้ก็ยังสำรองไปก่อน
             
             with zipfile.ZipFile(filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 # ฐานข้อมูล

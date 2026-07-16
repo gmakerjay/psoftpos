@@ -4,12 +4,14 @@
 """
 
 import customtkinter as ctk
+import tkinter as tk
 from tkinter import messagebox
 from database import DatabaseManager
 from utils import create_receipt_pdf, SalesLogManager, print_receipt, bind_english_input, kick_cash_drawer, translate_thai_barcode
 from config import *
 from datetime import datetime
 import json
+from utils.logger import log_user_action, log_sale, log_error, log_info
 
 
 class POSFrame(ctk.CTkFrame):
@@ -34,6 +36,8 @@ class POSFrame(ctk.CTkFrame):
         self._products_cache = {}  # Cache สินค้าที่ค้นหาบ่อย
         self._cache_time = None
         self._autocomplete_data = []  # ข้อมูลสำหรับ autocomplete
+        self._suggestion_visible = False  # สถานะ dropdown ค้นหาอัจฉริยะ
+        self._suggestion_debounce_id = None  # debounce timer สำหรับลด CPU
         
         # สร้าง UI ก่อน
         self.create_widgets()
@@ -119,10 +123,17 @@ class POSFrame(ctk.CTkFrame):
             border_width=0
         )
         self.search_entry.pack(side="left", fill="x", expand=True, padx=(0, 15), pady=15)
-        self.search_entry.bind("<Return>", lambda e: self.search_product())
+        self.search_entry.bind("<Return>", self._on_search_enter)
+        self.search_entry.bind("<KeyRelease>", self._on_search_key_release)
+        self.search_entry.bind("<Down>", self._suggestion_navigate)
+        self.search_entry.bind("<Up>", self._suggestion_navigate)
+        self.search_entry.bind("<Escape>", lambda e: self._hide_suggestions())
         self.search_entry.focus()
         # บังคับ EN input สำหรับปืนบาร์โค้ดทุกรุ่น แต่ยังยอมให้พิมพ์ไทยค้นหาได้
         bind_english_input(self.search_entry, allow_thai=True)
+        
+        # สร้าง Suggestion Dropdown (ซ่อนไว้จนกว่าจะพิมพ์)
+        self._suggestion_frame = None
         
         search_btn = ctk.CTkButton(
             search_frame,
@@ -1158,10 +1169,15 @@ class POSFrame(ctk.CTkFrame):
             # ทุกอย่างสำเร็จ — commit ทั้งหมด
             self.db.commit_transaction()
             self.db.disconnect()
+            
+            # บันทึก Log การขาย
+            log_sale(sale_id, total, len(self.cart_items))
+            log_user_action(self.user_id, "SALE", f"{sale_number} Total={total:,.2f} Paid={paid:,.2f} Change={change:,.2f}")
         except Exception as e:
             # ล้มเหลว — rollback ทั้งหมด (ข้อมูลไม่เปลี่ยน)
             self.db.rollback_transaction()
             self.db.disconnect()
+            log_error(f"Payment failed for user {self.user_id}: {e}")
             messagebox.showerror("ข้อผิดพลาด", f"ไม่สามารถบันทึกการขายได้:\n{e}")
             return
         
@@ -1317,7 +1333,7 @@ class POSFrame(ctk.CTkFrame):
         try:
             self.db.connect()
             products = self.db.fetch_all("""
-                SELECT product_id, product_name, barcode
+                SELECT product_id, product_name, barcode, retail_price, stock_quantity
                 FROM products 
                 WHERE is_active = 1
                 ORDER BY product_name
@@ -1325,17 +1341,251 @@ class POSFrame(ctk.CTkFrame):
             """)
             self.db.disconnect()
             
-            # เก็บเฉพาะชื่อและบาร์โค้ดสำหรับ autocomplete
-            self._autocomplete_data = [
-                {'text': p['product_name'], 'id': p['product_id']}
-                for p in products
-            ] + [
-                {'text': p['barcode'], 'id': p['product_id']}
-                for p in products if p['barcode']
-            ]
+            # เก็บข้อมูลสำหรับ smart search — ชื่อสินค้า + บาร์โค้ด + ราคา + สต็อก
+            self._autocomplete_data = []
+            for p in products:
+                self._autocomplete_data.append({
+                    'name': p['product_name'],
+                    'barcode': p['barcode'] or '',
+                    'price': p['retail_price'],
+                    'stock': p['stock_quantity'],
+                    'id': p['product_id']
+                })
         except Exception as e:
             print(f"[WARN] Failed to load autocomplete data: {e}")
             self._autocomplete_data = []
+    
+    # ================================================================
+    # Smart Search — ระบบค้นหาอัจฉริยะแบบ Dropdown ขณะพิมพ์
+    # ================================================================
+    
+    def _on_search_key_release(self, event):
+        """เรียกทุกครั้งที่ปล่อยปุ่มในช่องค้นหา — แสดง suggestion dropdown"""
+        # ข้ามปุ่มที่ไม่ใช่ตัวอักษร (ลูกศร, Ctrl, Shift ฯลฯ)
+        if event.keysym in ('Return', 'Up', 'Down', 'Escape', 'Shift_L', 'Shift_R',
+                            'Control_L', 'Control_R', 'Alt_L', 'Alt_R', 'Tab',
+                            'Caps_Lock', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6',
+                            'F7', 'F8', 'F9', 'F10', 'F11', 'F12'):
+            return
+        
+        # Debounce — รอ 150ms หลังพิมพ์ตัวสุดท้ายก่อนค้นหา (ลด CPU)
+        if self._suggestion_debounce_id:
+            self.after_cancel(self._suggestion_debounce_id)
+        self._suggestion_debounce_id = self.after(150, self._update_suggestions)
+    
+    def _update_suggestions(self):
+        """อัปเดตรายการแนะนำจากข้อมูลที่พิมพ์"""
+        query = self.search_entry.get().strip().lower()
+        query = translate_thai_barcode(query)  # แปลง barcode ภาษาไทยอัตโนมัติ
+        
+        if not query or len(query) < 1:
+            self._hide_suggestions()
+            return
+        
+        # ค้นหาจากข้อมูล cache ในหน่วยความจำ (ไม่ query DB = เร็วมาก)
+        matches = []
+        query_lower = query.lower()
+        for item in self._autocomplete_data:
+            name_lower = item['name'].lower()
+            barcode_lower = item['barcode'].lower()
+            
+            # ตรวจหาคำที่ตรงหรือใกล้เคียง
+            if query_lower in name_lower or query_lower in barcode_lower:
+                matches.append(item)
+            elif len(query_lower) >= 2:
+                # Fuzzy match: ตรวจสอบว่าตัวอักษรทุกตัวอยู่ในชื่อตามลำดับ
+                idx = 0
+                for char in query_lower:
+                    pos = name_lower.find(char, idx)
+                    if pos == -1:
+                        break
+                    idx = pos + 1
+                else:
+                    matches.append(item)
+            
+            if len(matches) >= 8:  # จำกัดแสดง 8 รายการ
+                break
+        
+        if matches:
+            self._show_suggestions(matches)
+        else:
+            self._hide_suggestions()
+    
+    def _show_suggestions(self, matches):
+        """แสดง dropdown รายการแนะนำ"""
+        self._hide_suggestions()  # ล้างเดิม
+        
+        # สร้าง frame สำหรับ dropdown
+        self._suggestion_frame = tk.Toplevel(self.winfo_toplevel())
+        self._suggestion_frame.withdraw()  # ซ่อนไว้ก่อนจนกว่าจะจัดตำแหน่งเสร็จ
+        self._suggestion_frame.overrideredirect(True)  # ไม่มี title bar
+        self._suggestion_frame.attributes('-topmost', True)
+        
+        # คำนวณตำแหน่ง dropdown ให้อยู่ใต้ช่องค้นหา
+        self.search_entry.update_idletasks()
+        x = self.search_entry.winfo_rootx()
+        y = self.search_entry.winfo_rooty() + self.search_entry.winfo_height()
+        w = self.search_entry.winfo_width() + 100  # กว้างกว่าช่อง search เล็กน้อย
+        
+        # Container frame พร้อมเงาและขอบมน
+        container = tk.Frame(self._suggestion_frame, bg='#E0E0E0', padx=1, pady=1)
+        container.pack(fill='both', expand=True)
+        
+        inner = tk.Frame(container, bg='white')
+        inner.pack(fill='both', expand=True)
+        
+        self._suggestion_items = []  # เก็บ reference ของแต่ละแถว
+        self._suggestion_selected = -1  # index ที่เลือก
+        self._suggestion_matches = matches  # เก็บข้อมูลที่ค้นพบ
+        
+        for i, item in enumerate(matches):
+            row = tk.Frame(inner, bg='white', cursor='hand2')
+            row.pack(fill='x', padx=2, pady=1)
+            
+            # ชื่อสินค้า (ซ้าย)
+            name_text = item['name']
+            if len(name_text) > 35:
+                name_text = name_text[:35] + '...'
+            
+            name_lbl = tk.Label(
+                row, text=name_text,
+                font=('Sarabun', 14),
+                bg='white', fg='#212121',
+                anchor='w', padx=10, pady=6
+            )
+            name_lbl.pack(side='left', fill='x', expand=True)
+            
+            # ราคาและสต็อก (ขวา)
+            price_text = f"฿{item['price']:,.0f}"
+            stock_text = f"คงเหลือ {item['stock']}"
+            stock_color = '#4CAF50' if item['stock'] > 5 else '#F44336'
+            
+            info_frame = tk.Frame(row, bg='white')
+            info_frame.pack(side='right', padx=10)
+            
+            tk.Label(
+                info_frame, text=price_text,
+                font=('Sarabun', 13, 'bold'),
+                bg='white', fg=COLORS['primary']
+            ).pack(side='left', padx=(0, 8))
+            
+            tk.Label(
+                info_frame, text=stock_text,
+                font=('Sarabun', 11),
+                bg='white', fg=stock_color
+            ).pack(side='left')
+            
+            # Separator line
+            if i < len(matches) - 1:
+                tk.Frame(inner, bg='#EEEEEE', height=1).pack(fill='x', padx=8)
+            
+            # Bind events — ทำให้ทั้งแถวและ label ทุกตัวคลิกได้
+            for widget in [row, name_lbl, info_frame]:
+                widget.bind('<Button-1>', lambda e, idx=i: self._select_suggestion(idx))
+                widget.bind('<Enter>', lambda e, r=row, idx=i: self._highlight_suggestion(idx))
+                widget.bind('<Leave>', lambda e, r=row, idx=i: self._unhighlight_suggestion(idx))
+            
+            self._suggestion_items.append(row)
+        
+        # จัดตำแหน่งและแสดง
+        self._suggestion_frame.geometry(f"{w}x{len(matches) * 42 + 4}+{x}+{y}")
+        self._suggestion_frame.deiconify()
+        self._suggestion_visible = True
+        
+        # ปิด dropdown เมื่อคลิกข้างนอก
+        self.winfo_toplevel().bind('<Button-1>', self._on_click_outside, add='+')
+    
+    def _hide_suggestions(self, event=None):
+        """ซ่อน dropdown"""
+        if self._suggestion_frame and self._suggestion_frame.winfo_exists():
+            self._suggestion_frame.destroy()
+        self._suggestion_frame = None
+        self._suggestion_visible = False
+        self._suggestion_selected = -1
+        try:
+            self.winfo_toplevel().unbind('<Button-1>')
+        except Exception:
+            pass
+    
+    def _highlight_suggestion(self, index):
+        """ไฮไลท์แถว"""
+        if 0 <= index < len(self._suggestion_items):
+            row = self._suggestion_items[index]
+            for widget in row.winfo_children():
+                if isinstance(widget, tk.Label):
+                    widget.configure(bg='#E3F2FD')
+                elif isinstance(widget, tk.Frame):
+                    widget.configure(bg='#E3F2FD')
+                    for child in widget.winfo_children():
+                        if isinstance(child, tk.Label):
+                            child.configure(bg='#E3F2FD')
+            row.configure(bg='#E3F2FD')
+            self._suggestion_selected = index
+    
+    def _unhighlight_suggestion(self, index):
+        """ยกเลิกไฮไลท์"""
+        if 0 <= index < len(self._suggestion_items):
+            row = self._suggestion_items[index]
+            for widget in row.winfo_children():
+                if isinstance(widget, tk.Label):
+                    widget.configure(bg='white')
+                elif isinstance(widget, tk.Frame):
+                    widget.configure(bg='white')
+                    for child in widget.winfo_children():
+                        if isinstance(child, tk.Label):
+                            child.configure(bg='white')
+            row.configure(bg='white')
+    
+    def _suggestion_navigate(self, event):
+        """เลื่อนขึ้น/ลงในรายการแนะนำด้วยปุ่มลูกศร"""
+        if not self._suggestion_visible or not self._suggestion_items:
+            return
+        
+        # ยกเลิก highlight เดิม
+        if self._suggestion_selected >= 0:
+            self._unhighlight_suggestion(self._suggestion_selected)
+        
+        if event.keysym == 'Down':
+            self._suggestion_selected = min(
+                self._suggestion_selected + 1, len(self._suggestion_items) - 1
+            )
+        elif event.keysym == 'Up':
+            self._suggestion_selected = max(self._suggestion_selected - 1, 0)
+        
+        self._highlight_suggestion(self._suggestion_selected)
+        return 'break'  # ป้องกัน cursor กระโดดในช่อง search
+    
+    def _select_suggestion(self, index):
+        """เลือกรายการจาก dropdown → เพิ่มสินค้าเข้าตะกร้าทันที"""
+        if 0 <= index < len(self._suggestion_matches):
+            item = self._suggestion_matches[index]
+            self._hide_suggestions()
+            
+            # ใส่ชื่อสินค้าลงช่อง search แล้วกด search
+            self.search_entry.delete(0, 'end')
+            self.search_entry.insert(0, item['barcode'] if item['barcode'] else item['name'])
+            self.search_product()
+    
+    def _on_search_enter(self, event=None):
+        """กด Enter ในช่องค้นหา — ถ้ามี suggestion ที่เลือกอยู่ ให้ใช้ตัวนั้น"""
+        if self._suggestion_visible and self._suggestion_selected >= 0:
+            self._select_suggestion(self._suggestion_selected)
+            return 'break'
+        else:
+            self._hide_suggestions()
+            self.search_product()
+    
+    def _on_click_outside(self, event):
+        """คลิกข้างนอก dropdown → ซ่อน"""
+        if self._suggestion_frame and self._suggestion_frame.winfo_exists():
+            # ตรวจสอบว่าคลิกข้างนอก dropdown จริงหรือไม่
+            try:
+                widget = event.widget
+                if str(widget).startswith(str(self._suggestion_frame)):
+                    return  # คลิกใน dropdown → ไม่ซ่อน
+            except Exception:
+                pass
+            self._hide_suggestions()
     
     def setup_keyboard_shortcuts(self):
         """ตั้งค่า keyboard shortcuts"""
