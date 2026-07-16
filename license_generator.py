@@ -85,7 +85,7 @@ class LicenseGeneratorApp(ctk.CTk):
             section1,
             font=("Courier New", 16),
             height=50,
-            placeholder_text="XXXX-XXXX-XXXX-XXXX"
+            placeholder_text="XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX"
         )
         self.hwid_entry.pack(fill="x", padx=20, pady=(0, 20))
         
@@ -240,9 +240,9 @@ class LicenseGeneratorApp(ctk.CTk):
             messagebox.showerror("ข้อผิดพลาด", "กรุณาใส่ Hardware ID ของลูกค้า")
             return
         
-        # ตรวจสอบรูปแบบ HWID
-        if len(hwid.replace("-", "")) != 16:
-            messagebox.showerror("ข้อผิดพลาด", "Hardware ID ไม่ถูกต้อง\nต้องเป็นรูปแบบ XXXX-XXXX-XXXX-XXXX")
+        # ตรวจสอบรูปแบบ HWID (ความยาว 32 ตัวอักษร สำหรับ SHA256)
+        if len(hwid.replace("-", "")) != 32:
+            messagebox.showerror("ข้อผิดพลาด", "Hardware ID ไม่ถูกต้อง\nต้องเป็นรูปแบบ XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX")
             return
         
         # คำนวณวันหมดอายุ

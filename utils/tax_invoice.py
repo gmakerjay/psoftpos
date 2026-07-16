@@ -15,6 +15,10 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
 import qrcode
 from io import BytesIO
+try:
+    from .pdf_utils import register_thai_font
+except ImportError:
+    from pdf_utils import register_thai_font
 
 
 class TaxInvoiceGenerator:
@@ -102,6 +106,7 @@ TAX_INVOICE
             'total': 214.00      # ราคารวม VAT
         }
         """
+        register_thai_font()
         invoice_no = self.generate_invoice_number()
         invoice_date = datetime.strptime(sale_data['sale_date'], "%Y-%m-%d %H:%M:%S")
         
@@ -135,7 +140,7 @@ TAX_INVOICE
             'Title',
             fontSize=20,
             alignment=TA_CENTER,
-            fontName='THSarabunNew-Bold',
+            fontName='THSarabunBold',
             textColor=colors.HexColor('#1565C0')
         )
         story.append(Paragraph("<b>ใบกำกับภาษี / Tax Invoice</b>", title_style))
@@ -146,7 +151,7 @@ TAX_INVOICE
             'InvoiceNo',
             fontSize=14,
             alignment=TA_CENTER,
-            fontName='THSarabunNew'
+            fontName='THSarabun'
         )
         story.append(Paragraph(f"เลขที่ / No.: <b>{invoice_no}</b>", invoice_no_style))
         story.append(Spacer(1, 5*mm))
@@ -155,27 +160,27 @@ TAX_INVOICE
         info_data = [
             # ผู้ขาย
             [
-                Paragraph("<b>ผู้ขาย / Seller:</b>", ParagraphStyle('Normal', fontSize=12, fontName='THSarabunNew-Bold')),
-                Paragraph("<b>ผู้ซื้อ / Buyer:</b>", ParagraphStyle('Normal', fontSize=12, fontName='THSarabunNew-Bold'))
+                Paragraph("<b>ผู้ขาย / Seller:</b>", ParagraphStyle('Normal', fontSize=12, fontName='THSarabunBold')),
+                Paragraph("<b>ผู้ซื้อ / Buyer:</b>", ParagraphStyle('Normal', fontSize=12, fontName='THSarabunBold'))
             ],
             [
-                Paragraph(f"{self.shop_info['name']}", ParagraphStyle('Normal', fontSize=11, fontName='THSarabunNew')),
-                Paragraph(f"{invoice_data['customer_name']}", ParagraphStyle('Normal', fontSize=11, fontName='THSarabunNew'))
+                Paragraph(f"{self.shop_info['name']}", ParagraphStyle('Normal', fontSize=11, fontName='THSarabun')),
+                Paragraph(f"{invoice_data['customer_name']}", ParagraphStyle('Normal', fontSize=11, fontName='THSarabun'))
             ],
             [
-                Paragraph(f"{self.shop_info['address']}", ParagraphStyle('Normal', fontSize=10, fontName='THSarabunNew')),
-                Paragraph(f"{invoice_data['customer_address']}", ParagraphStyle('Normal', fontSize=10, fontName='THSarabunNew'))
+                Paragraph(f"{self.shop_info['address']}", ParagraphStyle('Normal', fontSize=10, fontName='THSarabun')),
+                Paragraph(f"{invoice_data['customer_address']}", ParagraphStyle('Normal', fontSize=10, fontName='THSarabun'))
             ],
             [
-                Paragraph(f"เลขประจำตัวผู้เสียภาษี: <b>{self.shop_info['tax_id']}</b>", ParagraphStyle('Normal', fontSize=10, fontName='THSarabunNew')),
-                Paragraph(f"เลขประจำตัวผู้เสียภาษี: <b>{invoice_data['customer_tax_id']}</b>", ParagraphStyle('Normal', fontSize=10, fontName='THSarabunNew'))
+                Paragraph(f"เลขประจำตัวผู้เสียภาษี: <b>{self.shop_info['tax_id']}</b>", ParagraphStyle('Normal', fontSize=10, fontName='THSarabun')),
+                Paragraph(f"เลขประจำตัวผู้เสียภาษี: <b>{invoice_data['customer_tax_id']}</b>", ParagraphStyle('Normal', fontSize=10, fontName='THSarabun'))
             ],
             [
-                Paragraph(f"โทร: {self.shop_info['tel']}", ParagraphStyle('Normal', fontSize=10, fontName='THSarabunNew')),
-                Paragraph(f"วันที่: <b>{invoice_data['date']} {invoice_data['time']}</b>", ParagraphStyle('Normal', fontSize=10, fontName='THSarabunNew'))
+                Paragraph(f"โทร: {self.shop_info['tel']}", ParagraphStyle('Normal', fontSize=10, fontName='THSarabun')),
+                Paragraph(f"วันที่: <b>{invoice_data['date']} {invoice_data['time']}</b>", ParagraphStyle('Normal', fontSize=10, fontName='THSarabun'))
             ],
             [
-                Paragraph(f"สาขา: {self.shop_info['branch']}", ParagraphStyle('Normal', fontSize=10, fontName='THSarabunNew')),
+                Paragraph(f"สาขา: {self.shop_info['branch']}", ParagraphStyle('Normal', fontSize=10, fontName='THSarabun')),
                 ""
             ]
         ]
@@ -211,11 +216,11 @@ TAX_INVOICE
             # Header
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1565C0')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONTNAME', (0, 0), (-1, 0), 'THSarabunNew-Bold'),
+            ('FONTNAME', (0, 0), (-1, 0), 'THSarabunBold'),
             ('FONTSIZE', (0, 0), (-1, 0), 12),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
             # Body
-            ('FONTNAME', (0, 1), (-1, -1), 'THSarabunNew'),
+            ('FONTNAME', (0, 1), (-1, -1), 'THSarabun'),
             ('FONTSIZE', (0, 1), (-1, -1), 11),
             ('ALIGN', (0, 1), (0, -1), 'CENTER'),  # ลำดับ
             ('ALIGN', (1, 1), (1, -1), 'LEFT'),    # รายการ
@@ -236,7 +241,7 @@ TAX_INVOICE
         
         summary_table = Table(summary_data, colWidths=[155*mm, 25*mm])
         summary_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, -1), 'THSarabunNew'),
+            ('FONTNAME', (0, 0), (-1, -1), 'THSarabun'),
             ('FONTSIZE', (0, 0), (-1, -1), 12),
             ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
             ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
@@ -253,9 +258,9 @@ TAX_INVOICE
             [
                 Image(qr_path, width=40*mm, height=40*mm),
                 Paragraph("<b>ผู้จัดทำ</b><br/><br/><br/>_______________________<br/>วันที่: _____/_____/_____",
-                          ParagraphStyle('Center', fontSize=10, alignment=TA_CENTER, fontName='THSarabunNew')),
+                          ParagraphStyle('Center', fontSize=10, alignment=TA_CENTER, fontName='THSarabun')),
                 Paragraph("<b>ผู้อนุมัติ</b><br/><br/><br/>_______________________<br/>วันที่: _____/_____/_____",
-                          ParagraphStyle('Center', fontSize=10, alignment=TA_CENTER, fontName='THSarabunNew'))
+                          ParagraphStyle('Center', fontSize=10, alignment=TA_CENTER, fontName='THSarabun'))
             ]
         ]
         
@@ -278,6 +283,8 @@ TAX_INVOICE
 
 # ทดสอบ
 if __name__ == "__main__":
+    import sys
+    sys.stdout.reconfigure(encoding='utf-8')
     # ข้อมูลร้าน
     shop_info = {
         'name': 'บริษัท ตัวอย่าง จำกัด',
@@ -329,7 +336,7 @@ if __name__ == "__main__":
         print(f"💾 ไฟล์: {pdf_path}")
         
         # เปิดไฟล์
-        os.startfile(pdf_path)
+        os.startfile(os.path.abspath(pdf_path))
     except Exception as e:
         print(f"❌ เกิดข้อผิดพลาด: {e}")
         import traceback

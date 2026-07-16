@@ -269,7 +269,7 @@ class LicenseManagerApp(ctk.CTk):
             hwid_frame,
             font=("Courier New", 14),
             height=45,
-            placeholder_text="XXXX-XXXX-XXXX-XXXX"
+            placeholder_text="XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX"
         )
         self.validate_hwid_entry.pack(fill="x", padx=20, pady=5)
         

@@ -5,7 +5,7 @@ from .pdf_utils import create_receipt_pdf, register_thai_font, create_barcode_la
 from .printer_utils import print_receipt, get_printers, PrinterManager, kick_cash_drawer
 from .backup_utils import BackupManager, SalesLogManager
 from .image_utils import optimize_image
-from .input_utils import bind_english_input
+from .input_utils import bind_english_input, translate_thai_barcode
 
 __all__ = [
     'BarcodeGenerator',
@@ -23,4 +23,5 @@ __all__ = [
     'kick_cash_drawer',
     'BackupManager',
     'bind_english_input',
+    'translate_thai_barcode',
 ]

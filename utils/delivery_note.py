@@ -1,5 +1,3 @@
-8850617091104
-8850617091104
 # -*- coding: utf-8 -*-
 """
 Delivery Note Generator - สร้างใบส่งของ/ใบกำกับสินค้า
@@ -13,6 +11,10 @@ from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
+try:
+    from .pdf_utils import register_thai_font
+except ImportError:
+    from pdf_utils import register_thai_font
 
 
 class DeliveryNoteGenerator:
@@ -66,6 +68,7 @@ class DeliveryNoteGenerator:
             'note': 'หมายเหตุเพิ่มเติม'
         }
         """
+        register_thai_font()
         delivery_no = self.generate_delivery_number()
         delivery_date = datetime.strptime(delivery_data['delivery_date'], "%Y-%m-%d")
         
@@ -85,7 +88,7 @@ class DeliveryNoteGenerator:
             'Title',
             fontSize=22,
             alignment=TA_CENTER,
-            fontName='THSarabunNew-Bold',
+            fontName='THSarabunBold',
             textColor=colors.HexColor('#2E7D32')
         )
         story.append(Paragraph("<b>ใบส่งของ / Delivery Note</b>", title_style))
@@ -96,7 +99,7 @@ class DeliveryNoteGenerator:
             'DNNo',
             fontSize=14,
             alignment=TA_CENTER,
-            fontName='THSarabunNew'
+            fontName='THSarabun'
         )
         story.append(Paragraph(f"เลขที่ / No.: <b>{delivery_no}</b>", dn_style))
         story.append(Paragraph(f"วันที่ / Date: <b>{delivery_date.strftime('%d/%m/%Y')}</b>", dn_style))
@@ -106,20 +109,20 @@ class DeliveryNoteGenerator:
         info_data = [
             # ผู้ส่ง
             [
-                Paragraph("<b>ผู้ส่ง / Sender:</b>", ParagraphStyle('Normal', fontSize=12, fontName='THSarabunNew-Bold')),
-                Paragraph("<b>ผู้รับ / Receiver:</b>", ParagraphStyle('Normal', fontSize=12, fontName='THSarabunNew-Bold'))
+                Paragraph("<b>ผู้ส่ง / Sender:</b>", ParagraphStyle('Normal', fontSize=12, fontName='THSarabunBold')),
+                Paragraph("<b>ผู้รับ / Receiver:</b>", ParagraphStyle('Normal', fontSize=12, fontName='THSarabunBold'))
             ],
             [
-                Paragraph(f"<b>{delivery_data['sender_name']}</b>", ParagraphStyle('Normal', fontSize=11, fontName='THSarabunNew')),
-                Paragraph(f"<b>{delivery_data['receiver_name']}</b>", ParagraphStyle('Normal', fontSize=11, fontName='THSarabunNew'))
+                Paragraph(f"<b>{delivery_data['sender_name']}</b>", ParagraphStyle('Normal', fontSize=11, fontName='THSarabun')),
+                Paragraph(f"<b>{delivery_data['receiver_name']}</b>", ParagraphStyle('Normal', fontSize=11, fontName='THSarabun'))
             ],
             [
-                Paragraph(f"{delivery_data['sender_address']}", ParagraphStyle('Normal', fontSize=10, fontName='THSarabunNew')),
-                Paragraph(f"{delivery_data['receiver_address']}", ParagraphStyle('Normal', fontSize=10, fontName='THSarabunNew'))
+                Paragraph(f"{delivery_data['sender_address']}", ParagraphStyle('Normal', fontSize=10, fontName='THSarabun')),
+                Paragraph(f"{delivery_data['receiver_address']}", ParagraphStyle('Normal', fontSize=10, fontName='THSarabun'))
             ],
             [
-                Paragraph(f"โทร: {delivery_data['sender_tel']}", ParagraphStyle('Normal', fontSize=10, fontName='THSarabunNew')),
-                Paragraph(f"โทร: {delivery_data['receiver_tel']}", ParagraphStyle('Normal', fontSize=10, fontName='THSarabunNew'))
+                Paragraph(f"โทร: {delivery_data['sender_tel']}", ParagraphStyle('Normal', fontSize=10, fontName='THSarabun')),
+                Paragraph(f"โทร: {delivery_data['receiver_tel']}", ParagraphStyle('Normal', fontSize=10, fontName='THSarabun'))
             ]
         ]
         
@@ -138,7 +141,7 @@ class DeliveryNoteGenerator:
         # วิธีการจัดส่ง
         delivery_method_data = [[
             Paragraph(f"<b>วิธีการจัดส่ง:</b> {delivery_data.get('delivery_method', '-')}", 
-                      ParagraphStyle('Normal', fontSize=11, fontName='THSarabunNew'))
+                      ParagraphStyle('Normal', fontSize=11, fontName='THSarabun'))
         ]]
         
         dm_table = Table(delivery_method_data, colWidths=[180*mm])
@@ -173,11 +176,11 @@ class DeliveryNoteGenerator:
             # Header
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2E7D32')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONTNAME', (0, 0), (-1, 0), 'THSarabunNew-Bold'),
+            ('FONTNAME', (0, 0), (-1, 0), 'THSarabunBold'),
             ('FONTSIZE', (0, 0), (-1, 0), 12),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
             # Body
-            ('FONTNAME', (0, 1), (-1, -1), 'THSarabunNew'),
+            ('FONTNAME', (0, 1), (-1, -1), 'THSarabun'),
             ('FONTSIZE', (0, 1), (-1, -1), 11),
             ('ALIGN', (0, 1), (0, -1), 'CENTER'),  # ลำดับ
             ('ALIGN', (1, 1), (1, -1), 'LEFT'),    # รายการ
@@ -194,7 +197,7 @@ class DeliveryNoteGenerator:
         if delivery_data.get('note'):
             note_data = [[
                 Paragraph(f"<b>หมายเหตุ:</b> {delivery_data['note']}", 
-                          ParagraphStyle('Normal', fontSize=10, fontName='THSarabunNew'))
+                          ParagraphStyle('Normal', fontSize=10, fontName='THSarabun'))
             ]]
             
             note_table = Table(note_data, colWidths=[180*mm])
@@ -213,36 +216,36 @@ class DeliveryNoteGenerator:
         signature_data = [
             [
                 Paragraph("<b>ผู้ส่งของ / Sender</b>", 
-                          ParagraphStyle('Center', fontSize=11, alignment=TA_CENTER, fontName='THSarabunNew-Bold')),
+                          ParagraphStyle('Center', fontSize=11, alignment=TA_CENTER, fontName='THSarabunBold')),
                 Paragraph("<b>ผู้รับของ / Receiver</b>", 
-                          ParagraphStyle('Center', fontSize=11, alignment=TA_CENTER, fontName='THSarabunNew-Bold')),
+                          ParagraphStyle('Center', fontSize=11, alignment=TA_CENTER, fontName='THSarabunBold')),
                 Paragraph("<b>ผู้อนุมัติ / Approved By</b>", 
-                          ParagraphStyle('Center', fontSize=11, alignment=TA_CENTER, fontName='THSarabunNew-Bold'))
+                          ParagraphStyle('Center', fontSize=11, alignment=TA_CENTER, fontName='THSarabunBold'))
             ],
             ['', '', ''],  # ช่องว่างสำหรับลายเซ็น
             [
                 Paragraph("_______________________", 
-                          ParagraphStyle('Center', fontSize=10, alignment=TA_CENTER, fontName='THSarabunNew')),
+                          ParagraphStyle('Center', fontSize=10, alignment=TA_CENTER, fontName='THSarabun')),
                 Paragraph("_______________________", 
-                          ParagraphStyle('Center', fontSize=10, alignment=TA_CENTER, fontName='THSarabunNew')),
+                          ParagraphStyle('Center', fontSize=10, alignment=TA_CENTER, fontName='THSarabun')),
                 Paragraph("_______________________", 
-                          ParagraphStyle('Center', fontSize=10, alignment=TA_CENTER, fontName='THSarabunNew'))
+                          ParagraphStyle('Center', fontSize=10, alignment=TA_CENTER, fontName='THSarabun'))
             ],
             [
                 Paragraph("( ______________________ )", 
-                          ParagraphStyle('Center', fontSize=10, alignment=TA_CENTER, fontName='THSarabunNew')),
+                          ParagraphStyle('Center', fontSize=10, alignment=TA_CENTER, fontName='THSarabun')),
                 Paragraph("( ______________________ )", 
-                          ParagraphStyle('Center', fontSize=10, alignment=TA_CENTER, fontName='THSarabunNew')),
+                          ParagraphStyle('Center', fontSize=10, alignment=TA_CENTER, fontName='THSarabun')),
                 Paragraph("( ______________________ )", 
-                          ParagraphStyle('Center', fontSize=10, alignment=TA_CENTER, fontName='THSarabunNew'))
+                          ParagraphStyle('Center', fontSize=10, alignment=TA_CENTER, fontName='THSarabun'))
             ],
             [
                 Paragraph("วันที่: _____/_____/_____", 
-                          ParagraphStyle('Center', fontSize=10, alignment=TA_CENTER, fontName='THSarabunNew')),
+                          ParagraphStyle('Center', fontSize=10, alignment=TA_CENTER, fontName='THSarabun')),
                 Paragraph("วันที่: _____/_____/_____", 
-                          ParagraphStyle('Center', fontSize=10, alignment=TA_CENTER, fontName='THSarabunNew')),
+                          ParagraphStyle('Center', fontSize=10, alignment=TA_CENTER, fontName='THSarabun')),
                 Paragraph("วันที่: _____/_____/_____", 
-                          ParagraphStyle('Center', fontSize=10, alignment=TA_CENTER, fontName='THSarabunNew'))
+                          ParagraphStyle('Center', fontSize=10, alignment=TA_CENTER, fontName='THSarabun'))
             ]
         ]
         
@@ -262,6 +265,8 @@ class DeliveryNoteGenerator:
 
 # ทดสอบ
 if __name__ == "__main__":
+    import sys
+    sys.stdout.reconfigure(encoding='utf-8')
     # ข้อมูลร้าน
     shop_info = {
         'name': 'บริษัท ตัวอย่าง จำกัด',
@@ -312,7 +317,7 @@ if __name__ == "__main__":
         print(f"💾 ไฟล์: {pdf_path}")
         
         # เปิดไฟล์
-        os.startfile(pdf_path)
+        os.startfile(os.path.abspath(pdf_path))
     except Exception as e:
         print(f"❌ เกิดข้อผิดพลาด: {e}")
         import traceback

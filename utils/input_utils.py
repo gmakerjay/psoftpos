@@ -43,7 +43,7 @@ else:
     _CTYPES_AVAILABLE = False
 
 
-def bind_english_input(widget):
+def bind_english_input(widget, allow_thai=False):
     """
     ผูก event กับ widget เพื่อบังคับให้รับ input เป็น EN เมื่อ focus
     รองรับปืนบาร์โค้ดทุกรุ่น — ทำงานบน Windows เท่านั้น
@@ -94,4 +94,40 @@ def bind_english_input(widget):
 
     widget.bind("<FocusIn>", on_focus_in, add="+")
     widget.bind("<FocusOut>", on_focus_out, add="+")
-    widget.bind("<KeyPress>", on_key_press, add="+")
+    if not allow_thai:
+        widget.bind("<KeyPress>", on_key_press, add="+")
+
+
+def translate_thai_barcode(text):
+    """
+    แปลงตัวอักษรภาษาไทยที่เกิดจากการสแกนบาร์โค้ดใน Layout ภาษาไทย
+    กลับไปเป็นตัวเลขบาร์โค้ดภาษาอังกฤษมาตรฐาน (Kedmanee Layout Mapping)
+    """
+    if not text:
+        return text
+
+    # แผนผังแป้นพิมพ์ภาษาไทย (Kedmanee) -> ตัวเลขและสัญลักษณ์ในแป้นภาษาอังกฤษ
+    mapping = {
+        'ๅ': '1', '/': '2', '_': '3', 'ภ': '4', 'ถ': '5',
+        'ุ': '6', 'ึ': '7', 'ค': '8', 'ต': '9', 'จ': '0',
+        'ข': '-', 'ช': '='
+    }
+
+    translated = []
+    has_thai_digits = False
+    for char in text:
+        if char in mapping:
+            translated.append(mapping[char])
+            has_thai_digits = True
+        else:
+            translated.append(char)
+
+    translated_str = "".join(translated)
+
+    # หากมีการแปลงและผลลัพธ์ที่ได้เป็นตัวเลขและเครื่องหมายขีดล้วนๆ และความยาวเหมาะสมสำหรับบาร์โค้ด (>= 8 ตัวอักษร)
+    clean_check = translated_str.replace("-", "")
+    if has_thai_digits and clean_check.isdigit() and len(translated_str) >= 8:
+        return translated_str
+
+    return text
+

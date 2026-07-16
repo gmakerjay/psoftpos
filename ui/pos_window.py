@@ -6,7 +6,7 @@
 import customtkinter as ctk
 from tkinter import messagebox
 from database import DatabaseManager
-from utils import create_receipt_pdf, SalesLogManager, print_receipt, bind_english_input, kick_cash_drawer
+from utils import create_receipt_pdf, SalesLogManager, print_receipt, bind_english_input, kick_cash_drawer, translate_thai_barcode
 from config import *
 from datetime import datetime
 import json
@@ -17,6 +17,7 @@ class POSFrame(ctk.CTkFrame):
     
     def __init__(self, parent, user_id, user_info):
         super().__init__(parent, fg_color=COLORS["light"])
+        self.root_window = parent.winfo_toplevel()
         self.user_id = user_id
         self.user_info = user_info
         self.db = DatabaseManager()
@@ -81,19 +82,23 @@ class POSFrame(ctk.CTkFrame):
         header.pack(side="left")
         
         # Customer Display Button
+        has_display = hasattr(self.root_window, 'customer_display') and self.root_window.customer_display and self.root_window.customer_display.winfo_exists()
+        btn_text = "📺 ปิดจอลูกค้า" if has_display else "📺 เปิดจอลูกค้า"
+        btn_color = COLORS["danger"] if has_display else COLORS["info"]
+
         self.display_btn = ctk.CTkButton(
             header_frame,
-            text="📺 เปิดจอลูกค้า",
+            text=btn_text,
             font=FONTS["button"],
             width=150,
             height=40,
-            fg_color=COLORS["info"],
+            fg_color=btn_color,
             hover_color=COLORS["hover"],
             command=self.toggle_customer_display
         )
         self.display_btn.pack(side="right", padx=10)
         
-        self.customer_display = None
+        self.customer_display = self.root_window.customer_display if has_display else None
         
         # ช่องค้นหา
         search_frame = ctk.CTkFrame(parent, fg_color="white", corner_radius=10)
@@ -116,8 +121,8 @@ class POSFrame(ctk.CTkFrame):
         self.search_entry.pack(side="left", fill="x", expand=True, padx=(0, 15), pady=15)
         self.search_entry.bind("<Return>", lambda e: self.search_product())
         self.search_entry.focus()
-        # บังคับ EN input สำหรับปืนบาร์โค้ดทุกรุ่น
-        bind_english_input(self.search_entry)
+        # บังคับ EN input สำหรับปืนบาร์โค้ดทุกรุ่น แต่ยังยอมให้พิมพ์ไทยค้นหาได้
+        bind_english_input(self.search_entry, allow_thai=True)
         
         search_btn = ctk.CTkButton(
             search_frame,
@@ -602,6 +607,7 @@ class POSFrame(ctk.CTkFrame):
     def search_product(self, event=None):
         """ค้นหาสินค้า - Optimized with caching"""
         search_text = self.search_entry.get().strip()
+        search_text = translate_thai_barcode(search_text)
         
         if not search_text:
             self.load_all_products()
@@ -905,8 +911,8 @@ class POSFrame(ctk.CTkFrame):
         self.tax_label.configure(text=f"฿{tax_amount:,.2f}")
         self.total_label.configure(text=f"฿{total:,.2f}")
         
-        # อัพเดท Customer Display (ถ้าเปิดอยู่) - ไม่เรียก update_customer_display() ที่นี่
-        # เพื่อป้องกัน infinite recursion
+        # อัพเดท Customer Display (ถ้าเปิดอยู่)
+        self.update_customer_display()
     
     def clear_cart(self):
         """ล้างตะกร้า"""
@@ -1419,9 +1425,10 @@ class POSFrame(ctk.CTkFrame):
         try:
             from ui.customer_display import CustomerDisplayWindow
             
-            if self.customer_display is None or not self.customer_display.winfo_exists():
-                # เปิดจอลูกค้า
-                self.customer_display = CustomerDisplayWindow(self)
+            if not hasattr(self.root_window, 'customer_display') or self.root_window.customer_display is None or not self.root_window.customer_display.winfo_exists():
+                # เปิดจอลูกค้า โดยใช้ root_window เพื่อให้ไม่ถูกทำลายเมื่อเปลี่ยนหน้า
+                self.root_window.customer_display = CustomerDisplayWindow(self.root_window)
+                self.customer_display = self.root_window.customer_display
                 self.display_btn.configure(
                     text="📺 ปิดจอลูกค้า",
                     fg_color=COLORS["danger"]
@@ -1429,7 +1436,8 @@ class POSFrame(ctk.CTkFrame):
                 self.update_customer_display()
             else:
                 # ปิดจอลูกค้า
-                self.customer_display.destroy()
+                self.root_window.customer_display.destroy()
+                self.root_window.customer_display = None
                 self.customer_display = None
                 self.display_btn.configure(
                     text="📺 เปิดจอลูกค้า",
