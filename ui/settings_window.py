@@ -959,7 +959,8 @@ class SettingsFrame(ctk.CTkFrame):
                 dest_img_dir = PRODUCTS_IMG_DIR
                 dest_img_dir.mkdir(parents=True, exist_ok=True)
                 for img_file in img_restore_dir.iterdir():
-                    shutil.copy(img_file, dest_img_dir / img_file.name)
+                    if img_file.is_file():
+                        shutil.copy(img_file, dest_img_dir / img_file.name)
             
             # คืนใบเสร็จ (BUG-012)
             receipt_restore_dir = temp_dir / "receipts"
@@ -967,7 +968,8 @@ class SettingsFrame(ctk.CTkFrame):
                 dest_receipt_dir = Path("data/receipts")
                 dest_receipt_dir.mkdir(parents=True, exist_ok=True)
                 for receipt_file in receipt_restore_dir.iterdir():
-                    shutil.copy(receipt_file, dest_receipt_dir / receipt_file.name)
+                    if receipt_file.is_file():
+                        shutil.copy(receipt_file, dest_receipt_dir / receipt_file.name)
             
             # ลบ temp
             shutil.rmtree(temp_dir)

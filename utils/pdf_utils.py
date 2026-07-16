@@ -283,6 +283,7 @@ def export_sales_report(sales_data, filename):
 def create_barcode_labels_pdf(print_items, filename, cols=3, rows=10, show_name=True, show_price=True, show_code=True):
     """
     สร้างไฟล์ PDF สำหรับพริ้นบาร์โค้ดสินค้าในแบบตาราง (Grid Labels) ลงในกระดาษ A4
+    ใช้ python-barcode สร้างภาพบาร์โค้ดจริง (scannable)
     """
     register_thai_font()
     
@@ -291,6 +292,11 @@ def create_barcode_labels_pdf(print_items, filename, cols=3, rows=10, show_name=
         filename.parent.mkdir(parents=True, exist_ok=True)
         
     try:
+        import barcode as barcode_lib
+        from barcode.writer import ImageWriter
+        from io import BytesIO
+        from reportlab.platypus import Image as RLImage
+        
         # กำหนดขนาดกระดาษ A4 (210 x 297 mm)
         page_w, page_h = A4
         margin = 5 * mm
@@ -311,14 +317,13 @@ def create_barcode_labels_pdf(print_items, filename, cols=3, rows=10, show_name=
         
         styles = getSampleStyleSheet()
         
-        # สร้าง Style เฉพาะสำหรับป้ายสติ๊กเกอร์
         name_style = ParagraphStyle(
             'LabelName',
             parent=styles['Normal'],
             fontName='THSarabunBold',
             fontSize=8,
             leading=9,
-            alignment=1, # Center
+            alignment=1,
             textColor=colors.black
         )
         
@@ -328,11 +333,13 @@ def create_barcode_labels_pdf(print_items, filename, cols=3, rows=10, show_name=
             fontName='THSarabun',
             fontSize=8,
             leading=9,
-            alignment=1, # Center
+            alignment=1,
             textColor=colors.black
         )
         
         labels = []
+        # Cache barcode images per product (สร้างครั้งเดียว ใช้ซ้ำตามจำนวน)
+        barcode_cache = {}
         
         for item in print_items:
             name = item.get('product_name', '-')
@@ -342,6 +349,25 @@ def create_barcode_labels_pdf(print_items, filename, cols=3, rows=10, show_name=
             
             if not code:
                 continue
+            
+            # สร้าง barcode image (cache ต่อ barcode code)
+            if code not in barcode_cache:
+                try:
+                    code_class = barcode_lib.get_barcode_class('code128')
+                    bc_instance = code_class(str(code), writer=ImageWriter())
+                    buf = BytesIO()
+                    bc_instance.write(buf, options={
+                        'module_width': 0.25,
+                        'module_height': 8.0,
+                        'font_size': 0,
+                        'text_distance': 1,
+                        'quiet_zone': 1.0,
+                        'write_text': False,
+                    })
+                    barcode_cache[code] = buf.getvalue()
+                except Exception as e:
+                    print(f"Barcode image gen fail for '{code}': {e}")
+                    barcode_cache[code] = None
                 
             # วนลูปตามจำนวนดวงที่ต้องการพิมพ์
             for _ in range(qty):
@@ -349,54 +375,40 @@ def create_barcode_labels_pdf(print_items, filename, cols=3, rows=10, show_name=
                 
                 # 1. ชื่อสินค้า
                 if show_name:
-                    # ตัดชื่อถ้าสั้นเกินไปให้แสดงเป็นบรรทัดเดียว
                     short_name = name[:35] + ".." if len(name) > 35 else name
                     label_story.append(Paragraph(short_name, name_style))
                 
-                # 2. บาร์โค้ด
-                try:
-                    from reportlab.graphics.barcode import code128
-                    # ปรับ barWidth อัตโนมัติตามจำนวนหลักเพื่อไม่ให้ล้นช่อง
-                    bar_w = 0.35 * mm
-                    if len(code) > 15:
-                        bar_w = 0.25 * mm
-                    elif len(code) > 10:
-                        bar_w = 0.3 * mm
-                        
-                    barcode_flowable = code128.Code128(
-                        code, 
-                        barHeight=8*mm, 
-                        barWidth=bar_w,
-                        quiet=False
-                    )
-                    
-                    t_bar = Table([[barcode_flowable]], colWidths=[cell_w - 4*mm])
-                    t_bar.setStyle(TableStyle([
-                        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-                        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                        ('LEFTPADDING', (0,0), (-1,-1), 0),
-                        ('RIGHTPADDING', (0,0), (-1,-1), 0),
-                        ('TOPPADDING', (0,0), (-1,-1), 2),
-                        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
-                    ]))
-                    label_story.append(t_bar)
-                except Exception as e:
-                    print(f"Barcode gen fail for '{code}': {e}")
-                    # ถ้าสร้างไม่สำเร็จ ให้ใส่ช่องว่าง
-                    label_story.append(Spacer(1, 8*mm))
+                # 2. แถบบาร์โค้ด (ภาพจริงที่สแกนได้)
+                bc_data = barcode_cache.get(code)
+                if bc_data:
+                    try:
+                        bc_buf = BytesIO(bc_data)
+                        bc_width = cell_w - 6*mm
+                        bc_height = 7*mm
+                        img = RLImage(bc_buf, width=bc_width, height=bc_height)
+                        img.hAlign = 'CENTER'
+                        label_story.append(img)
+                    except Exception as e:
+                        print(f"Barcode embed fail: {e}")
+                        label_story.append(Spacer(1, 7*mm))
+                else:
+                    label_story.append(Spacer(1, 7*mm))
                 
                 # 3. รหัสและราคา
                 info_parts = []
                 if show_code:
                     info_parts.append(code)
                 if show_price:
-                    info_parts.append(f"<b>฿{price:,.2f}</b>")
+                    try:
+                        price_val = float(price)
+                        info_parts.append(f"<b>฿{price_val:,.2f}</b>")
+                    except (ValueError, TypeError):
+                        info_parts.append(f"<b>฿{price}</b>")
                     
                 if info_parts:
                     info_text = "  |  ".join(info_parts)
                     label_story.append(Paragraph(info_text, info_style))
                     
-                # สร้างตารางย่อยครอบเพื่อให้จัดกลางในช่อง Grid ได้
                 label_table = Table([ [label_story] ], colWidths=[cell_w - 2*mm], rowHeights=[cell_h - 2*mm])
                 label_table.setStyle(TableStyle([
                     ('ALIGN', (0,0), (-1,-1), 'CENTER'),
@@ -416,12 +428,10 @@ def create_barcode_labels_pdf(print_items, filename, cols=3, rows=10, show_name=
         rows_data = []
         for i in range(0, len(labels), cols):
             chunk = labels[i:i+cols]
-            # เติมช่องว่างหากแถวสุดท้ายไม่เต็มคอลัมน์
             while len(chunk) < cols:
                 chunk.append(Paragraph("", name_style))
             rows_data.append(chunk)
             
-        # สร้าง Master Table
         master_table = Table(
             rows_data, 
             colWidths=[cell_w] * cols,
@@ -430,7 +440,7 @@ def create_barcode_labels_pdf(print_items, filename, cols=3, rows=10, show_name=
         master_table.setStyle(TableStyle([
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('GRID', (0,0), (-1,-1), 0.3, colors.lightgrey), # วาดตารางสีจางเพื่อให้ง่ายต่อการตัดป้าย
+            ('GRID', (0,0), (-1,-1), 0.3, colors.lightgrey),
             ('LEFTPADDING', (0,0), (-1,-1), 0),
             ('RIGHTPADDING', (0,0), (-1,-1), 0),
             ('TOPPADDING', (0,0), (-1,-1), 0),
@@ -445,3 +455,4 @@ def create_barcode_labels_pdf(print_items, filename, cols=3, rows=10, show_name=
         import traceback
         traceback.print_exc()
         return False
+
