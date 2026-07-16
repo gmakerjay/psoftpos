@@ -46,33 +46,26 @@ class DatabaseManager:
                 log_info("Database tables missing. Auto-initializing database...")
                 self.initialize_database()
                 
-            # เฝ้าระวังความถูกต้องของเครื่องพิมพ์ XP-58 (copy 1) ให้เป็นโหมด windows (GDI) และ 58mm เสมอ ป้องกันการพิมพ์มั่ว
+            # เฝ้าระวังและตั้งค่าเริ่มต้นให้เครื่องพิมพ์ XP-58 (GDI) ป้องกันภาษาไทยมั่วในกรณีที่เพิ่งลงหรือติดตั้งฐานข้อมูลใหม่
             self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='settings'")
             if self.cursor.fetchone():
-                self.cursor.execute("SELECT setting_value FROM settings WHERE setting_key = 'printer_name'")
-                p_name_row = self.cursor.fetchone()
-                if p_name_row:
-                    p_name = p_name_row[0] or ""
-                    if "XP-58" in p_name:
-                        self.cursor.execute("SELECT setting_value FROM settings WHERE setting_key = 'printer_type'")
-                        p_type_row = self.cursor.fetchone()
-                        
-                        self.cursor.execute("SELECT setting_value FROM settings WHERE setting_key = 'paper_size'")
-                        p_size_row = self.cursor.fetchone()
-                        
-                        need_update = False
-                        p_type = p_type_row[0] if p_type_row else ""
-                        p_size = p_size_row[0] if p_size_row else ""
-                        
-                        if p_type != "windows":
-                            need_update = True
-                            p_type = "windows"
-                        if p_size != "58mm":
-                            need_update = True
-                            p_size = "58mm"
+                self.cursor.execute("SELECT setting_value FROM settings WHERE setting_key = 'printer_type'")
+                p_type_row = self.cursor.fetchone()
+                
+                self.cursor.execute("SELECT setting_value FROM settings WHERE setting_key = 'paper_size'")
+                p_size_row = self.cursor.fetchone()
+                
+                # หากยังไม่มีการตั้งค่าเครื่องพิมพ์ ค่อยใส่ค่าเริ่มต้นเพื่อให้พร้อมใช้งานทันที
+                if not p_type_row or not p_size_row or not p_type_row[0] or not p_size_row[0]:
+                    self.cursor.execute("SELECT setting_value FROM settings WHERE setting_key = 'printer_name'")
+                    p_name_row = self.cursor.fetchone()
+                    if p_name_row:
+                        p_name = p_name_row[0] or ""
+                        if "XP-58" in p_name:
+                            p_type = p_type_row[0] if (p_type_row and p_type_row[0]) else "windows"
+                            p_size = p_size_row[0] if (p_size_row and p_size_row[0]) else "58mm"
                             
-                        if need_update:
-                            log_info(f"Enforcing correct printer settings for {p_name}: GDI mode (windows) and 58mm.")
+                            log_info(f"Auto-initializing defaults for printer {p_name}: GDI mode ({p_type}) and {p_size}.")
                             self.cursor.execute(
                                 "INSERT OR REPLACE INTO settings (setting_key, setting_value) VALUES ('printer_type', ?)",
                                 (p_type,)
