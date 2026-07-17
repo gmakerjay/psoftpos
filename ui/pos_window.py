@@ -41,6 +41,7 @@ class POSFrame(ctk.CTkFrame):
         
         # สร้าง UI ก่อน
         self.create_widgets()
+        self.load_members_dropdown()
         
         # จากนั้นค่อย update summary และโหลดข้อมูล
         self.update_summary()
@@ -175,7 +176,9 @@ class POSFrame(ctk.CTkFrame):
             'discount_type': "amount",
             'discount_value': 0,
             'vat_enabled': False,
-            'vat_rate': TAX_RATE
+            'vat_rate': TAX_RATE,
+            'selected_member_id': None,
+            'member_name': "-- เลือกสมาชิก --"
         }
         self.sessions.append(session)
         
@@ -194,7 +197,9 @@ class POSFrame(ctk.CTkFrame):
                 'discount_type': self.discount_type_combo.get() if hasattr(self, 'discount_type_combo') else "บาท",
                 'discount_value': float(self.discount_entry.get()) if hasattr(self, 'discount_entry') and self.discount_entry.get() else 0,
                 'vat_enabled': self.vat_enabled,
-                'vat_rate': self.vat_rate
+                'vat_rate': self.vat_rate,
+                'selected_member_id': self.selected_member_id if hasattr(self, 'selected_member_id') else None,
+                'member_name': self.member_var.get() if hasattr(self, 'member_var') else "-- เลือกสมาชิก --"
             }
 
     def load_session_data(self, index):
@@ -206,6 +211,7 @@ class POSFrame(ctk.CTkFrame):
         self.discount_value = session['discount_value']
         self.vat_enabled = session['vat_enabled']
         self.vat_rate = session['vat_rate']
+        self.selected_member_id = session.get('selected_member_id', None)
         
         # อัปเดต UI widgets ถ้าถูกสร้างแล้ว
         if hasattr(self, 'discount_entry'):
@@ -213,6 +219,9 @@ class POSFrame(ctk.CTkFrame):
             self.discount_entry.insert(0, str(int(self.discount_value) if self.discount_value == int(self.discount_value) else self.discount_value))
             self.discount_type_combo.set(self.discount_type if self.discount_type in ["บาท", "%"] else "บาท")
             
+            if hasattr(self, 'member_combo'):
+                self.member_var.set(session.get('member_name', "-- เลือกสมาชิก --"))
+                
             if self.vat_enabled:
                 self.vat_checkbox.select()
             else:
@@ -343,6 +352,29 @@ class POSFrame(ctk.CTkFrame):
             height=300
         )
         self.cart_list.pack(fill="both", expand=True)
+        
+        # ค้นหาและเลือกสมาชิก
+        member_frame = ctk.CTkFrame(parent, fg_color="white", corner_radius=0)
+        member_frame.pack(fill="x", padx=15, pady=(15, 0))
+        
+        ctk.CTkLabel(
+            member_frame,
+            text="สมาชิก:",
+            font=FONTS["body"]
+        ).pack(side="left", padx=(0, 10))
+        
+        self.member_var = ctk.StringVar(value="-- เลือกสมาชิก --")
+        self.member_combo = ctk.CTkComboBox(
+            member_frame,
+            values=["-- เลือกสมาชิก --"],
+            variable=self.member_var,
+            width=230,
+            height=35,
+            font=FONTS["body"],
+            state="readonly",
+            command=self.on_member_selected
+        )
+        self.member_combo.pack(side="left", padx=5)
         
         # ส่วนลด
         discount_frame = ctk.CTkFrame(parent, fg_color="white", corner_radius=0)
@@ -563,6 +595,84 @@ class POSFrame(ctk.CTkFrame):
         for product in products:
             self.create_product_card(product)
     
+    def load_members_dropdown(self):
+        """โหลดรายชื่อสมาชิกใส่ใน combobox"""
+        try:
+            self.db.connect()
+            members = self.db.fetch_all("SELECT member_id, name, phone FROM members ORDER BY name")
+            self.db.disconnect()
+            
+            self._members_cache_pos = {f"{m['name']} ({m['phone'] or '-'})": m['member_id'] for m in members}
+            values = ["-- เลือกสมาชิก --"] + list(self._members_cache_pos.keys())
+            self.member_combo.configure(values=values)
+            self.member_combo.set("-- เลือกสมาชิก --")
+            self.selected_member_id = None
+        except Exception as e:
+            print(f"Error loading members in POS: {e}")
+            
+    def on_member_selected(self, val):
+        """เมื่อเลือกสมาชิก คำนวณส่วนลดสมาชิกอัตโนมัติ"""
+        if val == "-- เลือกสมาชิก --":
+            self.selected_member_id = None
+            self.discount_entry.delete(0, 'end')
+            self.discount_entry.insert(0, "0")
+            self.discount_type_combo.set("บาท")
+            self.update_summary()
+            return
+            
+        member_id = self._members_cache_pos.get(val)
+        if not member_id:
+            return
+            
+        self.selected_member_id = member_id
+        
+        # ดึงรายละเอียดส่วนลดสมาชิก
+        try:
+            self.db.connect()
+            m = self.db.fetch_one("""
+                SELECT m.*, t.discount_percent as tier_discount
+                FROM members m
+                LEFT JOIN member_tiers t ON m.tier_id = t.tier_id
+                WHERE m.member_id = ?
+            """, (member_id,))
+            self.db.disconnect()
+            
+            if not m:
+                return
+                
+            # คำนวณส่วนลด
+            disc_type = m['discount_type']
+            disc_val = m['discount_value']
+            
+            # ตรวจสอบส่วนลดชั่วคราว
+            if m['discount_duration'] == 'temporary':
+                current_date = datetime.now().strftime("%Y-%m-%d")
+                start = m['discount_start_date']
+                end = m['discount_end_date']
+                if not (start and end and start <= current_date <= end):
+                    # ถ้าหมดอายุแล้ว หรือไม่อยู่ในช่วง ให้เปลี่ยนกลับไปใช้ส่วนลดตามระดับ (Tier)
+                    disc_type = "percent"
+                    disc_val = m['tier_discount'] or 0.0
+                    
+            if disc_type == "none":
+                # ใช้ส่วนลดตามระดับ (Tier)
+                disc_type = "percent"
+                disc_val = m['tier_discount'] or 0.0
+                
+            # ตั้งค่าช่องส่วนลด in UI
+            self.discount_entry.delete(0, 'end')
+            self.discount_entry.insert(0, str(int(disc_val) if disc_val == int(disc_val) else disc_val))
+            
+            if disc_type == "percent":
+                self.discount_type_combo.set("%")
+            else:
+                self.discount_type_combo.set("บาท")
+                
+            self.update_summary()
+            
+        except Exception as e:
+            print(f"Error applying member discount in POS: {e}")
+            
     def create_product_card(self, product):
         """สร้างการ์ดสินค้า"""
         card = ctk.CTkFrame(self.products_list, fg_color=COLORS["light"], corner_radius=10)
@@ -979,7 +1089,7 @@ class POSFrame(ctk.CTkFrame):
         # สร้างหน้าต่าง
         dialog = ctk.CTkToplevel(self)
         dialog.title("ชำระเงิน")
-        dialog.geometry("500x400")
+        dialog.geometry("520x550")
         dialog.transient(self)
         dialog.grab_set()
         
@@ -989,26 +1099,83 @@ class POSFrame(ctk.CTkFrame):
             text=f"ยอดที่ต้องชำระ: ฿{total:,.2f}",
             font=("Sarabun", 24, "bold"),
             text_color=COLORS["success"]
-        ).pack(pady=30)
+        ).pack(pady=20)
         
-        # รับเงิน
+        # ช่องทางชำระเงิน
         ctk.CTkLabel(
             dialog,
+            text="ช่องทางชำระเงิน:",
+            font=FONTS["body"]
+        ).pack(pady=(10, 2))
+        
+        payment_method_combo = ctk.CTkComboBox(
+            dialog,
+            values=["เงินสด", "โอนเงิน", "QR Code", "จ่ายผสม (Mixed)"],
+            font=FONTS["body"],
+            height=35,
+            width=250,
+            state="readonly",
+            command=lambda v: on_payment_method_change(v)
+        )
+        payment_method_combo.pack(pady=5)
+        payment_method_combo.set("เงินสด")
+        
+        # เฟรมสำหรับรับเงินแบบเดี่ยว
+        single_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        single_frame.pack(fill="x", padx=50)
+        
+        ctk.CTkLabel(
+            single_frame,
             text="รับเงิน:",
             font=FONTS["heading"]
-        ).pack(pady=(20, 10))
+        ).pack(pady=(5, 2))
         
         paid_entry = ctk.CTkEntry(
-            dialog,
+            single_frame,
             font=("Sarabun", 20),
-            height=50,
+            height=45,
             justify="center"
         )
-        paid_entry.pack(padx=50, fill="x", pady=10)
+        paid_entry.pack(fill="x", pady=5)
         paid_entry.insert(0, str(total))
         paid_entry.select_range(0, 'end')
         paid_entry.focus()
         
+        # เฟรมสำหรับรับเงินแบบผสม (เงินสด + โอน)
+        mixed_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        
+        ctk.CTkLabel(
+            mixed_frame,
+            text="จ่ายผสม (เงินสด + โอน/QR):",
+            font=FONTS["body"]
+        ).pack(pady=(5, 2))
+        
+        mixed_input_row = ctk.CTkFrame(mixed_frame, fg_color="transparent")
+        mixed_input_row.pack(fill="x", pady=5)
+        
+        ctk.CTkLabel(mixed_input_row, text="เงินสด:", font=FONTS["body"]).pack(side="left", padx=5)
+        cash_paid_entry = ctk.CTkEntry(mixed_input_row, font=("Sarabun", 16), height=35, width=120, justify="center")
+        cash_paid_entry.pack(side="left", padx=5)
+        cash_paid_entry.insert(0, "0")
+        
+        ctk.CTkLabel(mixed_input_row, text="โอน/QR:", font=FONTS["body"]).pack(side="left", padx=5)
+        transfer_paid_entry = ctk.CTkEntry(mixed_input_row, font=("Sarabun", 16), height=35, width=120, justify="center")
+        transfer_paid_entry.pack(side="left", padx=5)
+        transfer_paid_entry.insert(0, str(total))
+        
+        def on_payment_method_change(val):
+            if val == "จ่ายผสม (Mixed)":
+                single_frame.pack_forget()
+                mixed_frame.pack(fill="x", padx=50, pady=5)
+                cash_paid_entry.focus()
+                cash_paid_entry.select_range(0, 'end')
+            else:
+                mixed_frame.pack_forget()
+                single_frame.pack(fill="x", padx=50, pady=5)
+                paid_entry.focus()
+                paid_entry.select_range(0, 'end')
+            calculate_change()
+            
         # เงินทอน
         change_label = ctk.CTkLabel(
             dialog,
@@ -1016,15 +1183,20 @@ class POSFrame(ctk.CTkFrame):
             font=("Sarabun", 20, "bold"),
             text_color=COLORS["info"]
         )
-        change_label.pack(pady=20)
+        change_label.pack(pady=15)
         
         def calculate_change(*args):
             try:
-                paid_val = paid_entry.get().strip()
-                if not paid_val:
-                    paid = 0
+                method = payment_method_combo.get()
+                if method == "จ่ายผสม (Mixed)":
+                    c_str = cash_paid_entry.get().strip()
+                    t_str = transfer_paid_entry.get().strip()
+                    c_val = float(c_str) if c_str else 0.0
+                    t_val = float(t_str) if t_str else 0.0
+                    paid = c_val + t_val
                 else:
-                    paid = float(paid_val)
+                    p_str = paid_entry.get().strip()
+                    paid = float(p_str) if p_str else 0.0
                     
                 change = paid - total
                 if change < 0:
@@ -1049,12 +1221,14 @@ class POSFrame(ctk.CTkFrame):
                 change_label.configure(text="เงินทอน: ฿0.00")
         
         paid_entry.bind("<KeyRelease>", calculate_change)
+        cash_paid_entry.bind("<KeyRelease>", calculate_change)
+        transfer_paid_entry.bind("<KeyRelease>", calculate_change)
         # เรียกครั้งแรกเพื่ออัพเดทจอ
         calculate_change()
         
         # ปุ่ม
         btn_frame = ctk.CTkFrame(dialog, fg_color="transparent")
-        btn_frame.pack(fill="x", padx=50, pady=30)
+        btn_frame.pack(fill="x", padx=50, pady=20)
         
         cancel_btn = ctk.CTkButton(
             btn_frame,
@@ -1068,9 +1242,35 @@ class POSFrame(ctk.CTkFrame):
         cancel_btn.pack(side="left", padx=10)
         
         def do_payment(event=None):
+            import json
+            method = payment_method_combo.get()
+            method_db = "cash"
+            details_db = None
+            
+            if method == "โอนเงิน":
+                method_db = "transfer"
+            elif method == "QR Code":
+                method_db = "qr"
+            elif method == "จ่ายผสม (Mixed)":
+                method_db = "mixed"
+                try:
+                    c_val = float(cash_paid_entry.get().strip() or 0)
+                    t_val = float(transfer_paid_entry.get().strip() or 0)
+                    paid_val = c_val + t_val
+                    details_db = json.dumps({"cash": c_val, "transfer": t_val})
+                except ValueError:
+                    messagebox.showerror("ข้อผิดพลาด", "กรุณากรอกจำนวนเงินให้ถูกต้อง")
+                    return
+            else:
+                try:
+                    paid_val = float(paid_entry.get().strip() or 0)
+                except ValueError:
+                    messagebox.showerror("ข้อผิดพลาด", "กรุณากรอกจำนวนเงินให้ถูกต้อง")
+                    return
+                    
             self.process_payment(
                 dialog, total, subtotal, discount_amount, 
-                tax_amount, paid_entry.get()
+                tax_amount, str(paid_val), method_db, details_db
             )
 
         confirm_btn = ctk.CTkButton(
@@ -1086,9 +1286,11 @@ class POSFrame(ctk.CTkFrame):
         
         # ผูกปุ่ม Enter ให้ชำระเงินทันที
         paid_entry.bind("<Return>", do_payment)
+        cash_paid_entry.bind("<Return>", do_payment)
+        transfer_paid_entry.bind("<Return>", do_payment)
         dialog.bind("<Return>", do_payment)
     
-    def process_payment(self, dialog, total, subtotal, discount_amount, tax_amount, paid_str):
+    def process_payment(self, dialog, total, subtotal, discount_amount, tax_amount, paid_str, payment_method="cash", payment_details=None):
         """ประมวลผลการชำระเงิน"""
         try:
             paid = float(paid_str)
@@ -1116,14 +1318,14 @@ class POSFrame(ctk.CTkFrame):
                     sale_number, sale_date, user_id, price_type,
                     subtotal, discount_type, discount_value, discount_amount,
                     tax_amount, total_amount, paid_amount, change_amount,
-                    payment_method, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    payment_method, status, member_id, payment_details
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 sale_number, sale_date, self.user_id, self.price_type,
                 subtotal, self.discount_type_combo.get(), 
                 self.discount_entry.get(), discount_amount,
                 tax_amount, total, paid, change,
-                'cash', 'completed'
+                payment_method, 'completed', self.selected_member_id, payment_details
             ))
             
             if not success:
@@ -1135,6 +1337,15 @@ class POSFrame(ctk.CTkFrame):
                 (sale_number,)
             )
             sale_id = sale['sale_id']
+            
+            # ปรับแต้มสมาชิกสะสม (1 แต้ม ต่อทุกๆ 100 บาท)
+            if self.selected_member_id:
+                points_earned = int(total // 100)
+                if points_earned > 0:
+                    self.db.execute(
+                        "UPDATE members SET points = points + ? WHERE member_id = ?",
+                        (points_earned, self.selected_member_id)
+                    )
             
             # บันทึกรายการสินค้า
             for item in self.cart_items:
@@ -1185,18 +1396,30 @@ class POSFrame(ctk.CTkFrame):
         self.slm.add_sale({
             "sale_number": sale_number,
             "total_amount": total,
-            "payment_method": "cash"
+            "payment_method": payment_method
         })
         
         # ปิดหน้าต่างชำระเงินทันที
         dialog.destroy()
         
+        # ค้นหาชื่อสมาชิกมาแสดงบนใบเสร็จ
+        customer_name = 'ลูกค้าทั่วไป'
+        if self.selected_member_id:
+            try:
+                self.db.connect()
+                m = self.db.fetch_one("SELECT name FROM members WHERE member_id = ?", (self.selected_member_id,))
+                self.db.disconnect()
+                if m:
+                    customer_name = m['name']
+            except:
+                pass
+                
         # เตรียมข้อมูลสำหรับพิมพ์
         receipt_data = {
             'company': COMPANY_INFO,
             'sale_number': sale_number,
             'sale_date': sale_date,
-            'customer_name': 'ลูกค้าทั่วไป',
+            'customer_name': customer_name,
             'cashier': self.user_info['full_name'] if self.user_info else 'พนักงาน',
             'items': [dict(item) for item in self.cart_items],
             'subtotal': subtotal,

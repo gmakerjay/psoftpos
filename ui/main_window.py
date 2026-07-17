@@ -9,6 +9,7 @@ from database import DatabaseManager
 from config import *
 from datetime import datetime
 import sys
+import os
 from PIL import Image, ImageOps
 
 
@@ -39,6 +40,12 @@ class MainWindow:
         # ตัวแปร
         self.current_page = None
         
+        # โหลดและตั้งค่าภาพพื้นหลังขอบหน้าต่าง
+        self.init_background_image()
+        
+        # เริ่มต้นระบบจัดการหน่วยความจำและล้าง Cache อัตโนมัติ (สำหรับคอมพิวเตอร์สเปกต่ำ)
+        self.start_performance_loops()
+        
         # สร้าง UI
         self.create_layout()
         self.show_dashboard()
@@ -49,6 +56,83 @@ class MainWindow:
         # F1 Global Shortcut: กดจากหน้าไหนก็ได้ → ไปหน้า POS + focus ช่องสแกน
         self.window.bind("<F1>", lambda e: self.goto_pos_and_scan())
         
+    def init_background_image(self):
+        """โหลดและตั้งค่าภาพพื้นหลังขอบหน้าต่าง"""
+        try:
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            bg_img_path = os.path.join(base_dir, "assets", "app_border.png")
+            if os.path.exists(bg_img_path):
+                self.bg_image_pil = Image.open(bg_img_path)
+                self.bg_image = ctk.CTkImage(light_image=self.bg_image_pil, dark_image=self.bg_image_pil, size=(1400, 800))
+                
+                # แสดงภาพพื้นหลังผ่าน CTkLabel ที่วางแบบคลุมหน้าต่าง
+                self.bg_label = ctk.CTkLabel(self.window, image=self.bg_image, text="")
+                self.bg_label.place(x=0, y=0, relwidth=1, relheight=1)
+                self.bg_label.lower() # ส่งไปเลเยอร์ล่างสุด
+                
+                # Bind configuration event to resize image
+                self.window.bind("<Configure>", self.on_window_resize)
+        except Exception as e:
+            print(f"Error loading background image: {e}")
+
+    def on_window_resize(self, event):
+        """ปรับขนาดรูปภาพตามหน้าต่าง"""
+        if event.widget == self.window:
+            width = event.width
+            height = event.height
+            if hasattr(self, 'bg_image') and self.bg_image:
+                self.bg_image.configure(size=(width, height))
+
+    def start_performance_loops(self):
+        """เริ่มต้นระบบจัดการหน่วยความจำและล้าง Cache อัตโนมัติ"""
+        try:
+            import performance_config
+            if getattr(performance_config, 'ENABLE_GARBAGE_COLLECTION', True):
+                # รันครั้งแรกหลังเริ่มโปรแกรม 10 วินาที
+                self.window.after(10000, self.run_garbage_collection)
+        except Exception as e:
+            print(f"Error starting performance loop: {e}")
+
+    def run_garbage_collection(self):
+        """เรียกเก็บกวาดหน่วยความจำ และเคลียร์ cache ที่หมดความจำเป็น"""
+        try:
+            import gc
+            import performance_config
+            
+            # 1. รัน GC เคลียร์ cyclic references
+            collected = gc.collect()
+            print(f"[Memory Manager] GC collected {collected} objects.")
+            
+            # 2. ล้าง cache ที่ไม่ได้ทำงานอยู่เพื่อลดการใช้ RAM สะสม
+            if getattr(performance_config, 'CLEAR_CACHE_ON_LOW_MEMORY', True):
+                self.clear_inactive_caches()
+                
+            # วนลูปตามเวลาที่กำหนด (แปลงจากนาทีเป็น milliseconds)
+            interval_mins = getattr(performance_config, 'GC_INTERVAL_MINUTES', 5)
+            interval_ms = int(interval_mins) * 60 * 1000
+            self.window.after(interval_ms, self.run_garbage_collection)
+        except Exception as e:
+            print(f"Error in GC thread loop: {e}")
+
+    def clear_inactive_caches(self):
+        """ล้าง cache สะสมใน Widget ต่างๆ ที่ไม่ได้อยู่ในหน้าจอแสดงผลปัจจุบัน"""
+        try:
+            # ล้าง cache หน้า POS เมื่อไม่ได้อยู่ที่หน้า POS
+            if self.current_page != "pos" and hasattr(self, '_pos_frame') and self._pos_frame:
+                if hasattr(self._pos_frame, '_products_cache'):
+                    self._pos_frame._products_cache.clear()
+                    print("[Memory Manager] Cleared POS products search cache.")
+                if hasattr(self._pos_frame, '_members_cache_pos'):
+                    self._pos_frame._members_cache_pos.clear()
+                    print("[Memory Manager] Cleared POS members cache.")
+                self._pos_frame = None  # ล้าง reference ของ POS frame เก่า เพื่อทำลาย widget สมบูรณ์
+                
+            # รัน garbage collection ทันทีเพื่อกวาดแรมที่เพิ่งถูกล้าง
+            import gc
+            gc.collect()
+        except Exception as e:
+            print(f"Error clearing caches: {e}")
+
     def create_layout(self):
         """สร้างโครงสร้างหน้าหลัก"""
         # แถบด้านบน (Header)
@@ -56,7 +140,7 @@ class MainWindow:
         
         # เนื้อหาหลัก
         content_frame = ctk.CTkFrame(self.window, fg_color="transparent")
-        content_frame.pack(fill="both", expand=True)
+        content_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         
         # แถบด้านข้าง (Sidebar)
         self.create_sidebar(content_frame)
@@ -68,7 +152,7 @@ class MainWindow:
     def create_header(self):
         """สร้างแถบด้านบน"""
         header = ctk.CTkFrame(self.window, height=70, fg_color=COLORS["primary"])
-        header.pack(fill="x", padx=0, pady=0)
+        header.pack(fill="x", padx=10, pady=(10, 5))
         header.pack_propagate(False)
         
         # ชื่อโปรแกรม
@@ -107,9 +191,13 @@ class MainWindow:
         
     def update_time(self):
         """อัพเดทเวลาปัจจุบัน (ทุก 10 วินาทีเพื่อประหยัด CPU)"""
-        current_time = datetime.now().strftime(DATETIME_FORMAT)
-        self.time_label.configure(text=current_time)
-        self.window.after(10000, self.update_time)  # 10 วินาที (ลดจาก 1 วินาที)
+        try:
+            if self.window.winfo_exists():
+                current_time = datetime.now().strftime(DATETIME_FORMAT)
+                self.time_label.configure(text=current_time)
+                self.window.after(10000, self.update_time)  # 10 วินาที (ลดจาก 1 วินาที)
+        except Exception:
+            pass
         
     def create_sidebar(self, parent):
         """สร้างแถบเมนูด้านข้าง"""
@@ -123,6 +211,7 @@ class MainWindow:
             ("ขายสินค้า", "pos", ["manage_sales"]),
             ("จัดการสินค้า", "products", ["manage_products", "view_products"]),
             ("ประวัติการขาย", "history", ["view_history"]),
+            ("จัดการสมาชิก", "members", "all"),
             ("คืนสินค้า", "returns", ["manage_sales"]),
             ("จัดการสต็อก", "stock", ["manage_stock"]),
             ("จัดการผู้ใช้", "users", ["manage_users"]),
@@ -201,6 +290,10 @@ class MainWindow:
         for widget in self.content_area.winfo_children():
             widget.destroy()
             
+        # เคลียร์ reference ของ frame เดิมที่ถูกทำลายไปแล้วเพื่อป้องกัน Memory Leak
+        if hasattr(self, '_pos_frame'):
+            self._pos_frame = None
+            
         # แสดงหน้าที่เลือก
         self.current_page = page_id
         
@@ -214,6 +307,8 @@ class MainWindow:
             self.show_reports()
         elif page_id == "history":
             self.show_history()
+        elif page_id == "members":
+            self.show_members()
         elif page_id == "returns":
             self.show_returns()
         elif page_id == "stock":
@@ -372,6 +467,12 @@ class MainWindow:
         """แสดงหน้าตั้งค่า"""
         from .settings_window import SettingsFrame
         frame = SettingsFrame(self.content_area, self.user_id)
+        frame.pack(fill="both", expand=True)
+
+    def show_members(self):
+        """แสดงหน้าจัดการสมาชิก"""
+        from .member_window import MemberManagementFrame
+        frame = MemberManagementFrame(self.content_area, self.user_id)
         frame.pack(fill="both", expand=True)
 
     def show_brands(self):

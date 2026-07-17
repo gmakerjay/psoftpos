@@ -12,6 +12,8 @@ from tkinter import messagebox
 from database import DatabaseManager
 from config import *
 from datetime import datetime
+from tkcalendar import DateEntry
+from tkinter import filedialog
 
 
 class SalesHistoryFrame(ctk.CTkFrame):
@@ -31,10 +33,9 @@ class SalesHistoryFrame(ctk.CTkFrame):
         header_frame = ctk.CTkFrame(self, fg_color="transparent")
         header_frame.pack(fill="x", padx=20, pady=20)
         
-        today_str = datetime.now().strftime("%d/%m/%Y")
         title = ctk.CTkLabel(
             header_frame,
-            text=f"📋 ประวัติการขายวันนี้ ({today_str})",
+            text="📋 ค้นหาบิลและประวัติการขาย",
             font=FONTS["title"],
             text_color=COLORS["primary"]
         )
@@ -55,51 +56,68 @@ class SalesHistoryFrame(ctk.CTkFrame):
         )
         refresh_btn.pack(side="left", padx=5)
         
-        # ค้นหาเลขที่ใบเสร็จ
+        # ตัวกรองการค้นหา (วันที่ และ คำสำคัญ)
         search_frame = ctk.CTkFrame(self, fg_color="white", corner_radius=10)
         search_frame.pack(fill="x", padx=20, pady=(0, 15))
         
+        # ส่วนเลือกวันที่
+        date_frame = ctk.CTkFrame(search_frame, fg_color="transparent")
+        date_frame.pack(side="left", padx=15, pady=10)
+        
+        ctk.CTkLabel(date_frame, text="จากวันที่:", font=FONTS["body"]).pack(side="left")
+        self.start_date = DateEntry(date_frame, width=11, background=COLORS["primary"], date_pattern='dd/mm/yyyy')
+        self.start_date.pack(side="left", padx=5)
+        
+        ctk.CTkLabel(date_frame, text="ถึงวันที่:", font=FONTS["body"]).pack(side="left")
+        self.end_date = DateEntry(date_frame, width=11, background=COLORS["primary"], date_pattern='dd/mm/yyyy')
+        self.end_date.pack(side="left", padx=5)
+        
+        # ช่องค้นหาคำสำคัญ
         ctk.CTkLabel(
             search_frame,
-            text="🔍 ค้นหาเลขที่ใบเสร็จ:",
+            text="🔍 ค้นหา:",
             font=FONTS["body"]
-        ).pack(side="left", padx=20, pady=15)
+        ).pack(side="left", padx=(10, 2), pady=15)
         
-        self.search_number_entry = ctk.CTkEntry(
+        self.search_entry = ctk.CTkEntry(
             search_frame,
-            placeholder_text="SL...",
+            placeholder_text="เลขที่บิล/ชื่อลูกค้า/สมาชิก/พนักงาน/สินค้า",
             font=FONTS["body"],
-            width=200,
+            width=280,
             height=35
         )
-        self.search_number_entry.pack(side="left", padx=5)
-        self.search_number_entry.bind("<Return>", lambda e: self.load_sales_history())
+        self.search_entry.pack(side="left", padx=5)
+        self.search_entry.bind("<Return>", lambda e: self.load_sales_history())
         
         search_btn = ctk.CTkButton(
             search_frame,
             text="ค้นหา",
             font=FONTS["button"],
-            width=100,
-            height=40,
+            width=80,
+            height=35,
             fg_color=COLORS["primary"],
             command=self.load_sales_history
         )
-        search_btn.pack(side="left", padx=10, pady=15)
+        search_btn.pack(side="left", padx=5, pady=15)
         
-        info_label = ctk.CTkLabel(
+        # ปุ่มส่งออก Excel
+        export_btn = ctk.CTkButton(
             search_frame,
-            text="💡 ดูรายงานย้อนหลังและ Export ได้ที่ 📊 รายงานยอดขาย",
-            font=FONTS["small"],
-            text_color=COLORS["text_light"]
+            text="📥 Export Excel",
+            font=FONTS["button"],
+            width=120,
+            height=35,
+            fg_color=COLORS["success"],
+            command=self.export_history_to_excel
         )
-        info_label.pack(side="right", padx=20)
+        export_btn.pack(side="right", padx=20, pady=15)
         
         # สถิติสรุป
         stats_frame = ctk.CTkFrame(self, fg_color="transparent")
         stats_frame.pack(fill="x", padx=20, pady=(0, 15))
         
         self.total_sales_card = self.create_stat_card(
-            stats_frame, "💰 ยอดขายวันนี้", "฿0.00", COLORS["success"]
+            stats_frame, "💰 ยอดรวมที่แสดง", "฿0.00", COLORS["success"]
         )
         self.total_sales_card.pack(side="left", fill="x", expand=True, padx=5)
         
@@ -128,14 +146,14 @@ class SalesHistoryFrame(ctk.CTkFrame):
         
         headers = [
             ("เลขที่", 130),
-            ("เวลา", 80),
+            ("เวลา/วันที่", 110),
             ("จำนวน", 60),
             ("ยอดรวม", 100),
             ("ส่วนลด", 80),
             ("ยอดสุทธิ", 110),
             ("พนักงาน", 100),
             ("สถานะ", 100),
-            ("รายการสินค้า", 250),
+            ("รายการสินค้า", 220),
             ("จัดการ", 200)
         ]
         
@@ -180,21 +198,34 @@ class SalesHistoryFrame(ctk.CTkFrame):
         return card
     
     def load_sales_history(self):
-        """โหลดประวัติการขายวันนี้จาก DB"""
+        """โหลดประวัติการขายตามตัวกรอง"""
         # ล้างรายการเดิม
         for widget in self.sales_container.winfo_children():
             widget.destroy()
         
-        # ดึงข้อมูลเฉพาะวันนี้
-        today = datetime.now().strftime("%Y-%m-%d")
+        try:
+            filter_start = self.start_date.get_date()
+            filter_end = self.end_date.get_date()
+            start_str = f"{filter_start.strftime('%Y-%m-%d')} 00:00:00"
+            end_str = f"{filter_end.strftime('%Y-%m-%d')} 23:59:59"
+        except:
+            today = datetime.now().strftime("%Y-%m-%d")
+            start_str = f"{today} 00:00:00"
+            end_str = f"{today} 23:59:59"
         
-        params = [f"{today} 00:00:00", f"{today} 23:59:59"]
+        params = [start_str, end_str]
         search_query = ""
         
-        sale_number = self.search_number_entry.get().strip()
-        if sale_number:
-            search_query = " AND s.sale_number LIKE ?"
-            params.append(f"%{sale_number}%")
+        keyword = self.search_entry.get().strip()
+        if keyword:
+            search_query = """ AND (
+                s.sale_number LIKE ? 
+                OR m.name LIKE ? 
+                OR m.phone LIKE ? 
+                OR u.full_name LIKE ? 
+                OR si.product_name LIKE ?
+            )"""
+            params.extend([f"%{keyword}%"] * 5)
             
         limit = PERFORMANCE_MODE["items_per_page"] * 2 if PERFORMANCE_MODE["enabled"] else 200
         params.append(limit)
@@ -203,10 +234,12 @@ class SalesHistoryFrame(ctk.CTkFrame):
         sales = self.db.fetch_all(f"""
             SELECT s.*, u.full_name as cashier_name,
                    COUNT(si.item_id) as item_count,
-                   GROUP_CONCAT(COALESCE(si.product_name, 'Unknown') || ' x' || COALESCE(si.quantity, 0), ', ') as items_list
+                   GROUP_CONCAT(COALESCE(si.product_name, 'Unknown') || ' x' || COALESCE(si.quantity, 0), ', ') as items_list,
+                   m.name as member_name
             FROM sales s
             LEFT JOIN users u ON s.user_id = u.user_id
             LEFT JOIN sale_items si ON s.sale_id = si.sale_id
+            LEFT JOIN members m ON s.member_id = m.member_id
             WHERE s.sale_date >= ? AND s.sale_date <= ? {search_query}
             GROUP BY s.sale_id
             ORDER BY s.sale_date DESC
@@ -232,7 +265,7 @@ class SalesHistoryFrame(ctk.CTkFrame):
         if not sales:
             no_data = ctk.CTkLabel(
                 self.sales_container,
-                text="ยังไม่มีรายการขายวันนี้\n(ข้อมูลจะปรากฏหลังทำการขาย)",
+                text="ไม่พบรายการขายตามเงื่อนไขการค้นหา",
                 font=FONTS["body"],
                 text_color=COLORS["text_light"]
             )
@@ -242,7 +275,7 @@ class SalesHistoryFrame(ctk.CTkFrame):
         # แสดงรายการ
         for idx, sale in enumerate(sales):
             self.create_sale_row(sale, idx)
-    
+            
     def create_sale_row(self, sale, index):
         """สร้างแถวรายการขาย"""
         is_voided = sale['status'] in ('voided', 'returned')
@@ -265,17 +298,18 @@ class SalesHistoryFrame(ctk.CTkFrame):
             text_color="#999" if is_voided else COLORS["text_dark"]
         ).pack(side="left", padx=3)
         
-        # เวลา
+        # เวลา/วันที่
         try:
             sale_datetime = datetime.strptime(sale['sale_date'], DB_DATETIME_FORMAT)
-            time_str = sale_datetime.strftime("%H:%M")
+            time_str = sale_datetime.strftime("%H:%M %d/%m")
         except:
-            time_str = "-"
+            time_str = sale['sale_date'][:11]
+            
         ctk.CTkLabel(
             row,
             text=time_str,
             font=FONTS["body"],
-            width=80,
+            width=110,
             text_color="#999" if is_voided else COLORS["text_dark"]
         ).pack(side="left", padx=3)
         
@@ -352,7 +386,7 @@ class SalesHistoryFrame(ctk.CTkFrame):
             row,
             text=sale['items_list'] or "-",
             font=FONTS["small"],
-            width=250,
+            width=220,
             anchor="w",
             text_color="#999" if is_voided else COLORS["text_dark"]
         ).pack(side="left", padx=3)
@@ -367,22 +401,33 @@ class SalesHistoryFrame(ctk.CTkFrame):
             btn_frame,
             text="👁️",
             font=("Arial", 14),
-            width=35,
+            width=30,
             height=30,
             fg_color=COLORS["info"],
             command=lambda s=sale: self.view_sale_detail(s)
-        ).pack(side="left", padx=2)
+        ).pack(side="left", padx=1)
         
         # พิมพ์ใบเสร็จ
         ctk.CTkButton(
             btn_frame,
             text="🖨️",
             font=("Arial", 14),
-            width=35,
+            width=30,
             height=30,
             fg_color=COLORS["secondary"],
             command=lambda s=sale: self.print_receipt(s)
-        ).pack(side="left", padx=2)
+        ).pack(side="left", padx=1)
+        
+        # ส่งออก PDF (ใบเสร็จ)
+        ctk.CTkButton(
+            btn_frame,
+            text="📄",
+            font=("Arial", 14),
+            width=30,
+            height=30,
+            fg_color="#6366f1",
+            command=lambda s=sale: self.export_sale_to_pdf(s)
+        ).pack(side="left", padx=1)
         
         # ยกเลิกบิล (เฉพาะบิลที่ completed เท่านั้น)
         if not is_voided:
@@ -390,27 +435,24 @@ class SalesHistoryFrame(ctk.CTkFrame):
                 btn_frame,
                 text="🚫",
                 font=("Arial", 14),
-                width=35,
+                width=30,
                 height=30,
                 fg_color=COLORS["warning"],
                 hover_color=COLORS["danger"],
                 command=lambda s=sale: self.void_sale(s)
-            ).pack(side="left", padx=2)
+            ).pack(side="left", padx=1)
         
         # ลบบิล
         ctk.CTkButton(
             btn_frame,
             text="🗑️",
             font=("Arial", 14),
-            width=35,
+            width=30,
             height=30,
             fg_color=COLORS["danger"],
             command=lambda s_id=sale['sale_id']: self.delete_single_sale(s_id)
-        ).pack(side="left", padx=2)
-    
-    # ==========================================================
-    # ยกเลิกบิล (Void) — คืน stock + เปลี่ยนสถานะ + บันทึกลง backup
-    # ==========================================================
+        ).pack(side="left", padx=1)
+        
     def void_sale(self, sale):
         """ยกเลิกบิล — คืน stock กลับอัตโนมัติ"""
         result = messagebox.askyesno(
@@ -641,3 +683,158 @@ class SalesHistoryFrame(ctk.CTkFrame):
                 self.db.rollback_transaction()
                 self.db.disconnect()
                 messagebox.showerror("ผิดพลาด", f"ไม่สามารถลบข้อมูลได้:\n{e}")
+
+    def export_sale_to_pdf(self, sale):
+        """ส่งออกใบเสร็จเป็น PDF"""
+        self.db.connect()
+        items = self.db.fetch_all("SELECT * FROM sale_items WHERE sale_id = ?", (sale['sale_id'],))
+        self.db.disconnect()
+        
+        customer_name = 'ลูกค้าทั่วไป'
+        if sale.get('member_id'):
+            try:
+                self.db.connect()
+                m = self.db.fetch_one("SELECT name FROM members WHERE member_id = ?", (sale['member_id'],))
+                self.db.disconnect()
+                if m:
+                    customer_name = m['name']
+            except:
+                pass
+        
+        receipt_data = {
+            'company': COMPANY_INFO,
+            'sale_number': sale['sale_number'],
+            'sale_date': sale['sale_date'],
+            'customer_name': customer_name,
+            'cashier': sale.get('cashier_name', '-'),
+            'items': [dict(item) for item in items],
+            'subtotal': sale['subtotal'],
+            'discount_amount': sale['discount_amount'],
+            'tax_amount': sale['tax_amount'],
+            'total_amount': sale['total_amount'],
+            'paid_amount': sale['paid_amount'],
+            'change_amount': sale['change_amount']
+        }
+        
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".pdf",
+            filetypes=[("PDF files", "*.pdf")],
+            initialfile=f"Receipt_{sale['sale_number']}.pdf"
+        )
+        
+        if not filename:
+            return
+            
+        try:
+            from utils.pdf_utils import create_receipt_pdf
+            if create_receipt_pdf(receipt_data, filename=filename, paper_size="A4"):
+                messagebox.showinfo("สำเร็จ", f"ส่งออกไฟล์ PDF สำเร็จ!\nบันทึกที่: {filename}")
+            else:
+                messagebox.showerror("ข้อผิดพลาด", "ไม่สามารถสร้างไฟล์ PDF ได้")
+        except Exception as e:
+            messagebox.showerror("ข้อผิดพลาด", f"เกิดข้อผิดพลาดในการสร้าง PDF:\n{e}")
+
+    def export_history_to_excel(self):
+        """ส่งออกประวัติการขายตามที่ค้นหาเป็น Excel"""
+        try:
+            filter_start = self.start_date.get_date()
+            filter_end = self.end_date.get_date()
+            start = filter_start.strftime("%Y-%m-%d")
+            end = filter_end.strftime("%Y-%m-%d")
+        except Exception as e:
+            messagebox.showerror("ข้อผิดพลาด", f"กรุณาเลือกวันที่ที่ถูกต้อง: {e}")
+            return
+            
+        params = [f"{start} 00:00:00", f"{end} 23:59:59"]
+        search_query = ""
+        
+        keyword = self.search_entry.get().strip()
+        if keyword:
+            search_query = """ AND (
+                s.sale_number LIKE ? 
+                OR m.name LIKE ? 
+                OR m.phone LIKE ? 
+                OR u.full_name LIKE ? 
+                OR si.product_name LIKE ?
+            )"""
+            params.extend([f"%{keyword}%"] * 5)
+            
+        self.db.connect()
+        sales = self.db.fetch_all(f"""
+            SELECT s.sale_id, s.sale_number, s.sale_date,
+                   s.subtotal, s.discount_amount, s.tax_amount, 
+                   s.total_amount, s.paid_amount, s.change_amount, 
+                   s.payment_method, s.status,
+                   u.full_name as cashier_name,
+                   m.name as member_name,
+                   GROUP_CONCAT(si.product_name || ' x' || si.quantity) as items
+            FROM sales s
+            LEFT JOIN users u ON s.user_id = u.user_id
+            LEFT JOIN sale_items si ON s.sale_id = si.sale_id
+            LEFT JOIN members m ON s.member_id = m.member_id
+            WHERE s.sale_date >= ? AND s.sale_date <= ? {search_query}
+            GROUP BY s.sale_id
+            ORDER BY s.sale_date DESC
+        """, tuple(params))
+        self.db.disconnect()
+        
+        if not sales:
+            messagebox.showwarning("แจ้งเตือน", "ไม่มีข้อมูลประวัติขายตามเงื่อนไขที่เลือก")
+            return
+            
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx")],
+            initialfile=f"SalesHistory_{start}_to_{end}.xlsx"
+        )
+        
+        if not filename:
+            return
+            
+        try:
+            import openpyxl
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Sales History"
+            
+            headers = [
+                "เลขที่บิล", "วันที่/เวลา", "สมาชิก", "ยอดรวม", "ส่วนลด", "ภาษี", 
+                "ยอดสุทธิ", "รับเงิน", "เงินทอน", "วิธีชำระ", "สถานะ",
+                "พนักงาน", "รายการสินค้า"
+            ]
+            
+            for col, header in enumerate(headers, 1):
+                cell = ws.cell(1, col, header)
+                cell.font = openpyxl.styles.Font(bold=True, color="FFFFFF")
+                cell.fill = openpyxl.styles.PatternFill(start_color="1F538D", fill_type="solid")
+            
+            for row, sale in enumerate(sales, 2):
+                ws.cell(row, 1, sale['sale_number'])
+                ws.cell(row, 2, sale['sale_date'])
+                ws.cell(row, 3, sale['member_name'] or 'ลูกค้าทั่วไป')
+                ws.cell(row, 4, sale['subtotal'])
+                ws.cell(row, 5, sale['discount_amount'])
+                ws.cell(row, 6, sale['tax_amount'])
+                ws.cell(row, 7, sale['total_amount'])
+                ws.cell(row, 8, sale['paid_amount'])
+                ws.cell(row, 9, sale['change_amount'])
+                ws.cell(row, 10, sale['payment_method'])
+                ws.cell(row, 11, sale['status'])
+                ws.cell(row, 12, sale['cashier_name'])
+                ws.cell(row, 13, sale['items'] or '-')
+                
+            for col_cells in ws.columns:
+                max_length = 0
+                column = col_cells[0].column_letter
+                for cell in col_cells:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                ws.column_dimensions[column].width = min(max_length + 2, 50)
+                
+            wb.save(filename)
+            messagebox.showinfo("สำเร็จ", f"Export ประวัติการขายสำเร็จ!\nบันทึกที่: {filename}")
+        except Exception as e:
+            messagebox.showerror("ข้อผิดพลาด", f"ไม่สามารถบันทึกไฟล์ได้: {e}")

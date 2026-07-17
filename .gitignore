@@ -23,6 +23,9 @@ Backup/
 Logs/
 Excel_Exports/
 printer_debug.log
+data/.license
+data/.trial
+data/temp/
 
 # Zipped Portable Build
 StorePOS_Portable.zip

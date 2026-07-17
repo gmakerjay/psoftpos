@@ -126,6 +126,39 @@ class LicenseManagerApp(ctk.CTk):
             fg_color="#D32F2F",
             command=self.logout
         ).pack(side="right", padx=30)
+
+        # === Active Path Bar ===
+        path_bar = ctk.CTkFrame(self, fg_color="#2D2D2D", height=50)
+        path_bar.pack(fill="x")
+        path_bar.pack_propagate(False)
+        
+        self.path_label = ctk.CTkLabel(
+            path_bar,
+            text="📂 Active License: Auto-Detecting...",
+            font=("Sarabun", 12),
+            text_color="#E0E0E0"
+        )
+        self.path_label.pack(side="left", padx=20, pady=10)
+        
+        ctk.CTkButton(
+            path_bar,
+            text="📁 เลือกไฟล์เอง (Manual Select)",
+            font=("Sarabun", 12),
+            width=180,
+            height=32,
+            fg_color="#1976D2",
+            command=self.select_manual_path
+        ).pack(side="right", padx=10, pady=9)
+        
+        ctk.CTkButton(
+            path_bar,
+            text="🔄 ค้นหาอัตโนมัติ",
+            font=("Sarabun", 12),
+            width=130,
+            height=32,
+            fg_color="#4CAF50",
+            command=self.reset_to_auto_path
+        ).pack(side="right", padx=5, pady=9)
         
         # === Main Content ===
         main_frame = ctk.CTkFrame(self, fg_color="#1A1A1A")
@@ -152,6 +185,9 @@ class LicenseManagerApp(ctk.CTk):
         
         # === Tab 4: Validate License ===
         self.create_validate_tab(tab4)
+        
+        # อัปเดตข้อมูลตำแหน่งไฟล์เริ่มต้น
+        self.update_path_label()
     
     def create_view_tab(self, parent):
         """Tab สำหรับดู License"""
@@ -354,6 +390,7 @@ Message: {message}
         if result:
             if LicenseManager.delete_license():
                 self.delete_status.configure(text="✅ ลบ License สำเร็จ", text_color="#4CAF50")
+                self.update_path_label()
                 messagebox.showinfo("สำเร็จ", "ลบ License สำเร็จ!")
             else:
                 self.delete_status.configure(text="❌ ไม่พบ License", text_color="#F44336")
@@ -368,6 +405,7 @@ Message: {message}
         
         if LicenseManager.save_license(license_key):
             self.edit_status.configure(text="✅ บันทึก License สำเร็จ", text_color="#4CAF50")
+            self.update_path_label()
             messagebox.showinfo("สำเร็จ", "บันทึก License ใหม่สำเร็จ!")
         else:
             self.edit_status.configure(text="❌ ไม่สามารถบันทึกได้", text_color="#F44336")
@@ -410,6 +448,39 @@ Message: {message}
         self.validate_result.delete("1.0", "end")
         self.validate_result.insert("1.0", result)
     
+    def update_path_label(self):
+        """อัปเดตป้ายแสดงพาธไฟล์ License ปัจจุบัน"""
+        from utils.license_system import LicenseManager
+        path = LicenseManager.get_license_file_path()
+        if LicenseManager.MANUAL_LICENSE_PATH:
+            self.path_label.configure(text=f"📂 Active License (MANUAL): {path}", text_color="#FFB74D")
+        else:
+            if path and path.exists():
+                self.path_label.configure(text=f"📂 Active License (AUTO): {path}", text_color="#81C784")
+            else:
+                self.path_label.configure(text="📂 Active License: ไม่พบไฟล์ License บนเครื่อง (กรุณา Activate หรือเลือกไฟล์เอง)", text_color="#E57373")
+
+    def select_manual_path(self):
+        """เปิด filedialog ให้ผู้ใช้เลือกไฟล์ License เอง"""
+        from utils.license_system import LicenseManager
+        file_path = filedialog.askopenfilename(
+            title="เลือกไฟล์ License",
+            filetypes=[("License files", "*.license"), ("All files", "*.*")]
+        )
+        if file_path:
+            LicenseManager.set_manual_license_path(file_path)
+            self.update_path_label()
+            self.load_license_info()  # รีโหลดข้อมูลในหน้าจอทันทีถ้าเปิดอยู่
+            messagebox.showinfo("สำเร็จ", f"เปลี่ยนไปใช้งานไฟล์ License ที่เลือกแล้ว:\n{file_path}")
+
+    def reset_to_auto_path(self):
+        """กลับไปใช้การค้นหาอัตโนมัติ"""
+        from utils.license_system import LicenseManager
+        LicenseManager.set_manual_license_path(None)
+        self.update_path_label()
+        self.load_license_info()
+        messagebox.showinfo("สำเร็จ", "กลับไปใช้โหมดค้นหาไฟล์ License อัตโนมัติ")
+
     def logout(self):
         """Logout"""
         result = messagebox.askyesno("ยืนยัน", "ออกจากระบบ?")

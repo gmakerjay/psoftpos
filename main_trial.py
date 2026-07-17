@@ -1,15 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-โปรแกรมขายหน้าร้าน (Point of Sale System)
-เวอร์ชัน 1.0.0
-
-โปรแกรมจัดการร้านค้าครบวงจร
-- ขายสินค้า
-- จัดการสต็อก
-- รายงานและสถิติ
-- พิมพ์ใบเสร็จ
-- ระบบบาร์โค้ด
-- และอื่นๆ อีกมากมาย
+โปรแกรมขายหน้าร้าน (Point of Sale System) - เวอร์ชันทดลองใช้ 15 วัน
 """
 
 import sys
@@ -17,6 +8,13 @@ import os
 
 # เพิ่ม path สำหรับ import
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# ทำการ Override ระบบ License ด้วยระบบทดลองใช้งาน (15-Day Trial) เพื่อป้องกันผลกระทบกับโค้ดหลัก
+try:
+    import utils.license_system_trial as license_system_trial
+    sys.modules['utils.license_system'] = license_system_trial
+except Exception as e:
+    print(f"Error overriding license system for trial version: {e}")
 
 from ui import LoginWindow, MainWindow
 from ui.activation_window import ActivationWindow
@@ -82,38 +80,30 @@ def main():
     try:
         ensure_directories()
         register_process_font()
-        logger.info("Starting POS System...")
+        logger.info("Starting POS System (Trial Version)...")
         
         # ตรวจสอบ Activation ก่อน
         logger.info("🔐 Checking activation status...")
         is_activated, message, license_data = LicenseManager.check_activation()
         
         if not is_activated:
-            logger.warning(f"❌ โปรแกรมยังไม่ได้ Activate: {message}")
-            print(f"Program not activated: {message}")
+            logger.warning(f"❌ โปรแกรมทดลองหมดอายุการใช้งาน: {message}")
+            print(f"Trial expired: {message}")
             
-            # สร้าง root window ชั่วคราว
+            # สร้าง root window ชั่วคราวเพื่อแสดงกล่องข้อความแจ้งเตือนหมดอายุ
             root = ctk.CTk()
             root.withdraw()
             
-            # แสดงหน้า Activation
-            logger.info("🔑 Opening activation window...")
-            activation_window = ActivationWindow(root, on_success=lambda: logger.info("✅ Activation สำเร็จ!"))
-            root.wait_window(activation_window)
-            
-            # ตรวจสอบอีกครั้งหลัง Activate
-            is_activated, message, license_data = LicenseManager.check_activation()
+            # แสดงรายละเอียดการหมดอายุการใช้งานทดลอง
+            from tkinter import messagebox as mb
+            mb.showerror("เวอร์ชันทดลองหมดอายุแล้ว", f"{message}\n\nกรุณาติดต่อผู้ขายเพื่อลงทะเบียนเปิดใช้งานเต็มรูปแบบ")
             root.destroy()
-            
-            if not is_activated:
-                logger.warning("❌ ยกเลิกการใช้งาน - ไม่มี Activation")
-                print("Exit - No Activation")
-                sys.exit(0)
+            sys.exit(0)
         else:
-            logger.info(f"✅ โปรแกรมได้รับการ Activate แล้ว")
-            logger.info(f"📅 หมดอายุ: {license_data.get('expire_date', 'N/A')}")
-            print(f"Program activated")
-            print(f"Expiry: {license_data.get('expire_date', 'N/A')}")
+            logger.info(f"✅ โปรแกรมเวอร์ชันทดลองกำลังทำงาน")
+            logger.info(f"📅 วันหมดอายุ: {license_data.get('expire_date', 'N/A')} (คงเหลือ {license_data.get('days_left', 0)} วัน)")
+            print(f"Program activated in Trial Mode")
+            print(f"Expiry: {license_data.get('expire_date', 'N/A')} ({license_data.get('days_left', 0)} days left)")
         
         # === ตรวจสอบ License ใกล้หมดอายุ ===
         if is_activated and license_data:
@@ -153,8 +143,8 @@ def main():
         # ถ้า login สำเร็จ เปิดหน้าหลัก
         if user_id and user_info:
             full_name = user_info['full_name'] if 'full_name' in user_info.keys() else 'Unknown'
-            log_user_action(user_id, "LOGIN", f"User: {full_name}")
-            logger.info(f"User {user_id} logged in: {full_name}")
+            log_user_action(user_id, "LOGIN", f"User: {full_name} (Trial Version)")
+            logger.info(f"User {user_id} logged in: {full_name} (Trial Version)")
             
             # เริ่ม Session ใหม่
             new_log_session("USER_LOGIN")

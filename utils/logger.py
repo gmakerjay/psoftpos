@@ -28,6 +28,13 @@ class POSLogger:
     
     def setup_logger(self):
         """ตั้งค่า Logger"""
+        # ป้องกัน UnicodeEncodeError เมื่อรันบน Windows terminal (CP874/CP1252)
+        try:
+            sys.stdout.reconfigure(errors='replace')
+            sys.stderr.reconfigure(errors='replace')
+        except:
+            pass
+            
         # สร้างโฟลเดอร์ Logs
         os.makedirs("Logs", exist_ok=True)
         

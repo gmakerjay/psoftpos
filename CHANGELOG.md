@@ -4,6 +4,69 @@
 
 ---
 
+## [1.0.3] - 2026-07-17
+
+### 🔐 1. ปรับปรุงระบบ License & Activation ให้สมบูรณ์ (License System Enhancement)
+* **การปรับปรุง:**
+  * ตรวจสอบและยืนยันว่า `get_expiry_warning()` ใน `license_system.py` มี `try/except` ครบถ้วน ไม่มี syntax error
+  * ระบบ Activation ทำงานถูกต้อง: ตรวจสอบ License → แสดงหน้า HWID เมื่อยังไม่ Activate → ข้ามไป Login เมื่อ Activate แล้ว
+  * ระบบแจ้งเตือน License หมดอายุ ทำงานแบ่งระดับตามประเภท License (ทดสอบ/ระยะสั้น/ระยะยาว) ถูกต้อง
+* **ไฟล์ที่เกี่ยวข้อง:** [utils/license_system.py](file:///c:/Users/admin/Documents/store-pos/utils/license_system.py), [ui/activation_window.py](file:///c:/Users/admin/Documents/store-pos/ui/activation_window.py)
+
+---
+
+### 🔑 2. สร้าง Standalone KeyGen Tool — ไฟล์เดียวย้ายได้ทุกเครื่อง (Standalone License Key Generator)
+* **สิ่งที่ทำ:**
+  * สร้างไฟล์ `keygen_standalone.py` ที่รวม **HardwareID + LicenseManager + GUI** ไว้ในไฟล์เดียว
+  * **ไม่ต้องพึ่ง** `database`, `utils`, `config` หรือ module ใดๆ จาก project หลัก
+  * ใช้ SECRET_KEY ตรงกับ project หลัก ทำให้ License Key ที่สร้างใช้งานกับ POS ได้ทันที
+  * รองรับ GUI Mode (customtkinter) และ **CLI Mode** (fallback อัตโนมัติเมื่อไม่มี GUI)
+  * ฟีเจอร์ครบ: สร้าง License, ตรวจสอบ, ถอดรหัส, ดู HWID, สร้าง License ทดสอบ 1 วัน
+  * สร้าง `build_keygen.spec` สำหรับ build เป็น .exe ด้วย PyInstaller
+* **ไฟล์ใหม่:** [keygen_standalone.py](file:///c:/Users/admin/Documents/store-pos/keygen_standalone.py), [build_keygen.spec](file:///c:/Users/admin/Documents/store-pos/build_keygen.spec)
+
+---
+
+### 🗑️ 3. เพิ่มปุ่ม "ล้าง License เครื่องนี้" ในเครื่องมือผู้ขาย (Clear License Tool for Testing)
+* **สิ่งที่ทำ:**
+  * เพิ่มปุ่ม **"🗑️ ล้าง License เครื่องนี้ (สำหรับทดสอบ)"** ในส่วนเครื่องมือผู้ขายทั้ง 2 ไฟล์
+  * มีระบบยืนยันก่อนลบ (Confirm Dialog) แสดง path ของไฟล์และคำเตือน
+  * หลังจากลบ License จะแสดงผลลัพธ์พร้อมคำแนะนำขั้นตอนถัดไป
+  * เมื่อเปิดโปรแกรม POS ครั้งถัดไป จะแสดงหน้า Activation (HWID) ใหม่
+* **ไฟล์ที่แก้ไข:** [license_generator.py](file:///c:/Users/admin/Documents/store-pos/license_generator.py), [keygen_standalone.py](file:///c:/Users/admin/Documents/store-pos/keygen_standalone.py)
+
+---
+
+### 📦 4. Build Production และแพ็คไฟล์พร้อมส่งมอบ (Production Build & Packaging)
+* **สิ่งที่ทำ:**
+  * Build โปรแกรม POS หลัก (`StorePOS.exe`) ด้วย PyInstaller 6.20.0 + Python 3.12.10
+  * Build เครื่องมือ KeyGen (`KeyGen.exe`) แยกต่างหาก — ขนาดเบา (~2.8 MB)
+  * จัดโครงสร้างโฟลเดอร์ `PsotStore` บน Desktop พร้อมส่งมอบ:
+    ```
+    PsotStore/
+    ├── Program/           ← โปรแกรม POS (StorePOS.exe + dependencies)
+    │   ├── StorePOS.exe
+    │   ├── _internal/
+    │   ├── data/
+    │   │   ├── database.db
+    │   │   └── products/
+    │   ├── Backup/
+    │   ├── Logs/
+    │   └── Excel_Exports/
+    └── Tools/             ← เครื่องมือผู้ขาย (KeyGen.exe)
+        ├── KeyGen.exe
+        └── _internal/
+    ```
+  * รวม database.db พร้อมข้อมูลเริ่มต้นไว้ในแพ็คเกจ
+* **Build Info:**
+  * Platform: Windows 11 (10.0.26200)
+  * Python: 3.12.10
+  * PyInstaller: 6.20.0
+  * StorePOS.exe: ~17 MB
+  * KeyGen.exe: ~2.8 MB
+
+---
+
 ## [1.0.2] - 2026-07-16
 
 ### 🔑 1. เปลี่ยนรหัสผ่านตั้งต้นและสร้างบัญชีผู้ใช้จำกัดสิทธิ์ (Default Credentials & Role Setup)

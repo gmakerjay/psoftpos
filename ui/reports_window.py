@@ -704,26 +704,24 @@ class ReportsFrame(ctk.CTkFrame):
             except Exception as e:
                 backup_results.append(f"📄 TXT: ❌ ล้มเหลว ({e})")
             
-            # 3. ล้างข้อมูลใน Database
+            # 3. ปิดยอดในฐานข้อมูล (ปรับเป็น Archived แทนการลบข้อมูลจริง)
             try:
                 self.db.connect()
-                self.db.execute("DELETE FROM sale_items")
-                self.db.execute("DELETE FROM sales")
-                self.db.execute("DELETE FROM return_items")
-                self.db.execute("DELETE FROM returns")
+                self.db.execute("UPDATE sales SET is_archived = 1 WHERE is_archived = 0")
+                self.db.execute("UPDATE returns SET is_archived = 1 WHERE is_archived = 0")
                 self.db.disconnect()
                 
                 results_text = "\n".join(backup_results)
                 messagebox.showinfo(
                     "ปิดยอดสำเร็จ",
-                    f"ปิดยอดและล้างรายการเรียบร้อย\n\n"
+                    f"ปิดยอดรายวันและบันทึกประวัติเรียบร้อย\n\n"
                     f"📁 ไฟล์สำรองที่สร้าง:\n{results_text}\n\n"
                     f"📂 เก็บอยู่ในโฟลเดอร์ Backup/\n"
-                    f"ดูย้อนหลังได้ที่แท็บ 'ประวัติไฟล์ Backup'"
+                    f"ข้อมูลเดิมยังอยู่ในฐานข้อมูลและไฟล์สำรองทั้งหมด"
                 )
                 
             except Exception as e:
-                messagebox.showerror("ข้อผิดพลาด", f"ไม่สามารถล้างข้อมูลในฐานข้อมูลได้: {e}")
+                messagebox.showerror("ข้อผิดพลาด", f"ไม่สามารถอัปเดตสถานะปิดยอดในฐานข้อมูลได้: {e}")
             
             # 4. อัพเดท dropdown
             self.backup_file_combo.configure(values=self._get_backup_files())

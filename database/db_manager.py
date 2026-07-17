@@ -45,8 +45,119 @@ class DatabaseManager:
             if not self.cursor.fetchone():
                 log_info("Database tables missing. Auto-initializing database...")
                 self.initialize_database()
+            else:
+                self._upgrade_database_schema()
         except Exception as e:
             log_error(f"Error auto-initializing database: {e}")
+
+    def _upgrade_database_schema(self):
+        """อัปเกรดฐานข้อมูลแบบปลอดภัย (รักษาความเข้ากันได้ย้อนหลัง)"""
+        try:
+            # 0. สร้างตารางบันทึกประวัติ License
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS license_logs (
+                    log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    action TEXT,
+                    license_key TEXT,
+                    hwid TEXT,
+                    details TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # 1. สร้างตารางระดับสมาชิกและสมาชิกถ้ายังไม่มี
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS member_tiers (
+                    tier_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tier_name TEXT UNIQUE NOT NULL,
+                    discount_percent REAL DEFAULT 0.0,
+                    min_points INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # ใส่ระดับสมาชิกเริ่มต้นถ้าตารางว่าง
+            self.cursor.execute("SELECT COUNT(*) FROM member_tiers")
+            row = self.cursor.fetchone()
+            if row and row[0] == 0:
+                tiers = [
+                    ("สมาชิกทั่วไป (General)", 0.0, 0),
+                    ("สมาชิกระดับเงิน (Silver)", 5.0, 100),
+                    ("สมาชิกระดับทอง (Gold)", 10.0, 500),
+                    ("สมาชิกระดับแพลทินัม (Platinum)", 15.0, 1000),
+                    ("สมาชิกพิเศษ (VIP)", 20.0, 5000)
+                ]
+                for name, disc, pts in tiers:
+                    self.cursor.execute(
+                        "INSERT OR IGNORE INTO member_tiers (tier_name, discount_percent, min_points) VALUES (?, ?, ?)",
+                        (name, disc, pts)
+                    )
+            else:
+                # อัปเดตระดับสมาชิกเดิมให้เป็นภาษาไทยที่อ่านเข้าใจง่าย
+                self.cursor.execute("UPDATE OR IGNORE member_tiers SET tier_name = 'สมาชิกทั่วไป (General)' WHERE tier_name = 'General'")
+                self.cursor.execute("UPDATE OR IGNORE member_tiers SET tier_name = 'สมาชิกระดับเงิน (Silver)' WHERE tier_name = 'Silver'")
+                self.cursor.execute("UPDATE OR IGNORE member_tiers SET tier_name = 'สมาชิกระดับทอง (Gold)' WHERE tier_name = 'Gold'")
+                self.cursor.execute("UPDATE OR IGNORE member_tiers SET tier_name = 'สมาชิกระดับแพลทินัม (Platinum)' WHERE tier_name = 'Platinum'")
+                self.cursor.execute("UPDATE OR IGNORE member_tiers SET tier_name = 'สมาชิกพิเศษ (VIP)' WHERE tier_name = 'VIP'")
+            
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS members (
+                    member_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    phone TEXT,
+                    email TEXT,
+                    username TEXT UNIQUE,
+                    status TEXT DEFAULT 'active',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    expire_date TEXT,
+                    license_count INTEGER DEFAULT 0,
+                    notes TEXT,
+                    tier_id INTEGER,
+                    credit_balance REAL DEFAULT 0.0,
+                    points INTEGER DEFAULT 0,
+                    wallet_balance REAL DEFAULT 0.0,
+                    discount_type TEXT DEFAULT 'none',
+                    discount_value REAL DEFAULT 0.0,
+                    discount_duration TEXT DEFAULT 'permanent',
+                    discount_start_date TEXT,
+                    discount_end_date TEXT,
+                    FOREIGN KEY (tier_id) REFERENCES member_tiers (tier_id)
+                )
+            """)
+            
+            # 2. เพิ่มคอลัมน์ member_id ในตาราง sales ถ้ายังไม่มี
+            self.cursor.execute("PRAGMA table_info(sales)")
+            columns = [col[1] for col in self.cursor.fetchall()]
+            if 'member_id' not in columns:
+                log_info("Altering sales table to add member_id column...")
+                self.cursor.execute("ALTER TABLE sales ADD COLUMN member_id INTEGER REFERENCES members(member_id)")
+                
+            # เพิ่มคอลัมน์ payment_details (สำหรับช่องทางการชำระเงินที่หลากหลาย) ในตาราง sales ถ้ายังไม่มี
+            if 'payment_details' not in columns:
+                log_info("Altering sales table to add payment_details column...")
+                self.cursor.execute("ALTER TABLE sales ADD COLUMN payment_details TEXT")
+                
+            # เพิ่มคอลัมน์ is_archived ในตาราง sales ถ้ายังไม่มี
+            if 'is_archived' not in columns:
+                log_info("Altering sales table to add is_archived column...")
+                self.cursor.execute("ALTER TABLE sales ADD COLUMN is_archived INTEGER DEFAULT 0")
+                
+            # เพิ่มคอลัมน์ is_archived ในตาราง returns ถ้ายังไม่มี
+            self.cursor.execute("PRAGMA table_info(returns)")
+            returns_columns = [col[1] for col in self.cursor.fetchall()]
+            if 'is_archived' not in returns_columns:
+                log_info("Altering returns table to add is_archived column...")
+                self.cursor.execute("ALTER TABLE returns ADD COLUMN is_archived INTEGER DEFAULT 0")
+                
+            # 3. สร้าง Index เพื่อความเร็วในการค้นหา
+            self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_members_phone ON members(phone)")
+            self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_members_name ON members(name)")
+            self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_sales_member ON sales(member_id)")
+            self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_sales_archived ON sales(is_archived)")
+            self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_returns_archived ON returns(is_archived)")
+            
+        except Exception as e:
+            log_error(f"Error upgrading database schema: {e}")
         
     def connect(self):
         """เชื่อมต่อฐานข้อมูล - ดึง connection จาก pool หรือสร้างใหม่"""
@@ -115,7 +226,14 @@ class DatabaseManager:
             self.connection.close()
             self.connection = None
             self.cursor = None
-            self._in_transaction = False
+            self.is_in_transaction = False
+
+    def __enter__(self):
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.disconnect()
 
     @classmethod
     def close_all_connections(cls):
@@ -309,6 +427,7 @@ class DatabaseManager:
                 change_amount REAL DEFAULT 0,
                 payment_method TEXT DEFAULT 'cash',
                 status TEXT DEFAULT 'completed',
+                is_archived INTEGER DEFAULT 0,
                 notes TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users (user_id)
@@ -343,6 +462,7 @@ class DatabaseManager:
                 total_amount REAL DEFAULT 0,
                 reason TEXT,
                 status TEXT DEFAULT 'completed',
+                is_archived INTEGER DEFAULT 0,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (sale_id) REFERENCES sales (sale_id),
                 FOREIGN KEY (user_id) REFERENCES users (user_id)
@@ -442,6 +562,9 @@ class DatabaseManager:
         
         # สร้างหมวดหมู่เริ่มต้น
         self._create_default_categories()
+        
+        # อัปเกรดฐานข้อมูลแบบปลอดภัย (สร้างตารางสมาชิก)
+        self._upgrade_database_schema()
         
         self.disconnect()
         return True

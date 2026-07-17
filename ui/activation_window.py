@@ -19,13 +19,13 @@ class ActivationWindow(ctk.CTkToplevel):
         self.hwid = HardwareID.generate_hwid()
         
         self.title("🔐 Activate โปรแกรม POS")
-        self.geometry("700x600")
-        self.resizable(False, False)
+        self.geometry("700x700")
+        self.resizable(True, True)
         
         # Center window
         self.update_idletasks()
         x = (self.winfo_screenwidth() // 2) - (700 // 2)
-        y = (self.winfo_screenheight() // 2) - (600 // 2)
+        y = (self.winfo_screenheight() // 2) - (700 // 2)
         self.geometry(f"+{x}+{y}")
         
         self.transient(parent)
@@ -147,6 +147,31 @@ class ActivationWindow(ctk.CTkToplevel):
             text_color="#856404",
             wraplength=600
         ).pack(padx=15, pady=15)
+        
+        self.bind_context_menu(self.hwid_entry)
+        self.bind_context_menu(self.license_entry)
+        
+    def bind_context_menu(self, widget):
+        """ผูกเมนูคลิกขวา ตัด/คัดลอก/วาง สำหรับ Entry หรือ Textbox"""
+        import tkinter as tk
+        inner_widget = widget
+        if hasattr(widget, "_entry"):
+            inner_widget = widget._entry
+        elif hasattr(widget, "_textbox"):
+            inner_widget = widget._textbox
+            
+        menu = tk.Menu(inner_widget, tearoff=0)
+        menu.add_command(label="ตัด (Cut)", command=lambda: inner_widget.event_generate("<<Cut>>"))
+        menu.add_command(label="คัดลอก (Copy)", command=lambda: inner_widget.event_generate("<<Copy>>"))
+        menu.add_command(label="วาง (Paste)", command=lambda: inner_widget.event_generate("<<Paste>>"))
+        
+        def show_menu(event):
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
+                
+        inner_widget.bind("<Button-3>", show_menu)
     
     def copy_hwid(self):
         """Copy HWID ไปยัง Clipboard"""

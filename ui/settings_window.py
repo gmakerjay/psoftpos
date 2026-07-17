@@ -47,6 +47,7 @@ class SettingsFrame(ctk.CTkFrame):
         self.tab_view.add("สำรองข้อมูล")
         self.tab_view.add("เครื่องพิมพ์")
         self.tab_view.add("ขั้นสูง")
+        self.tab_view.add("สิทธิ์การใช้งาน")
         
         # สร้างเนื้อหาแต่ละแท็บ
         self.create_company_tab()
@@ -55,6 +56,7 @@ class SettingsFrame(ctk.CTkFrame):
         self.create_backup_tab()
         self.create_printer_tab()
         self.create_advanced_tab()
+        self.create_license_tab()
     
     def create_company_tab(self):
         """แท็บข้อมูลร้าน"""
@@ -648,9 +650,177 @@ class SettingsFrame(ctk.CTkFrame):
             fg_color="#d63031",
             hover_color="#b71c1c",
             command=self.reset_system
+        ).pack(padx=20, pady=(0, 20))
+     
+    def create_license_tab(self):
+        """แท็บสิทธิ์การใช้งาน (License)"""
+        tab = self.tab_view.tab("สิทธิ์การใช้งาน")
+        
+        # Clear existing widgets to allow UI redraw on reload
+        for widget in tab.winfo_children():
+            widget.destroy()
+            
+        content = ctk.CTkScrollableFrame(tab, fg_color="white", corner_radius=10)
+        content.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # 1. ข้อมูลสถานะสิทธิ์ปัจจุบัน
+        info_frame = ctk.CTkFrame(content, fg_color=COLORS["light"], corner_radius=10)
+        info_frame.pack(fill="x", padx=20, pady=20)
+        
+        ctk.CTkLabel(
+            info_frame,
+            text="🔑 สถานะการลงทะเบียนโปรแกรม",
+            font=FONTS["heading"],
+            text_color=COLORS["primary"]
+        ).pack(padx=20, pady=(20, 10), anchor="w")
+        
+        from utils.license_system import LicenseManager, HardwareID
+        is_activated, message, license_data = LicenseManager.check_activation()
+        
+        status_text = "✅ ได้รับสิทธิ์ใช้งานแล้ว (Activated)" if is_activated else f"❌ ยังไม่ได้เปิดใช้งาน ({message})"
+        status_color = COLORS["success"] if is_activated else COLORS["danger"]
+        
+        status_label = ctk.CTkLabel(
+            info_frame,
+            text=status_text,
+            font=("Sarabun", 18, "bold"),
+            text_color=status_color
         )
-        reset_btn.pack(padx=20, pady=(0, 20))
-    
+        status_label.pack(padx=20, pady=10, anchor="w")
+        
+        expire_val = license_data.get('expire_date', '-') if license_data else '-'
+        ctk.CTkLabel(
+            info_frame,
+            text=f"📅 วันหมดอายุ: {expire_val}",
+            font=FONTS["body"]
+        ).pack(padx=20, pady=5, anchor="w")
+        
+        # HWID ของฉัน
+        my_hwid = HardwareID.generate_hwid()
+        hwid_row = ctk.CTkFrame(info_frame, fg_color="transparent")
+        hwid_row.pack(fill="x", padx=20, pady=(10, 20))
+        
+        ctk.CTkLabel(
+            hwid_row,
+            text="🖥️ Hardware ID: ",
+            font=FONTS["body"]
+        ).pack(side="left")
+        
+        hwid_entry = ctk.CTkEntry(
+            hwid_row,
+            font=("Courier New", 12),
+            height=30,
+            width=300
+        )
+        hwid_entry.insert(0, my_hwid)
+        hwid_entry.configure(state="readonly")
+        hwid_entry.pack(side="left", padx=10)
+        
+        def copy_my_hwid():
+            self.clipboard_clear()
+            self.clipboard_append(my_hwid)
+            messagebox.showinfo("สำเร็จ", "คัดลอก Hardware ID เรียบร้อยแล้ว!")
+            
+        ctk.CTkButton(
+            hwid_row,
+            text="📋 Copy",
+            font=FONTS["small"],
+            width=70,
+            height=30,
+            command=copy_my_hwid
+        ).pack(side="left")
+        
+        # 2. เมนูการจัดการ
+        action_frame = ctk.CTkFrame(content, fg_color=COLORS["light"], corner_radius=10)
+        action_frame.pack(fill="x", padx=20, pady=(0, 20))
+        
+        ctk.CTkLabel(
+            action_frame,
+            text="⚙️ จัดการสิทธิ์การใช้งาน",
+            font=FONTS["heading"],
+            text_color=COLORS["primary"]
+        ).pack(padx=20, pady=(20, 10), anchor="w")
+        
+        btn_container = ctk.CTkFrame(action_frame, fg_color="transparent")
+        btn_container.pack(fill="x", padx=20, pady=(0, 20))
+        
+        def open_reactivate():
+            from ui.activation_window import ActivationWindow
+            act_win = ActivationWindow(self.winfo_toplevel(), on_success=lambda: messagebox.showinfo("สำเร็จ", "เปิดใช้งานสำเร็จ! กรุณารีสตาร์ทโปรแกรม"))
+            self.winfo_toplevel().wait_window(act_win)
+            self.create_license_tab()  # reload tab UI
+            
+        # ปุ่มเปิดหน้า Activate ซ้ำ
+        ctk.CTkButton(
+            btn_container,
+            text="🔑 เปิดใช้งานใหม่ / เปลี่ยนคีย์",
+            font=FONTS["button"],
+            width=200,
+            height=45,
+            fg_color=COLORS["primary"],
+            command=open_reactivate
+        ).pack(side="left", padx=5)
+        
+        def run_transfer():
+            if not messagebox.askyesno("ยืนยันการโอนย้าย", "คุณต้องการยกเลิก License บนเครื่องนี้เพื่อรับรหัสโอนย้ายใช่หรือไม่?\n\n⚠️ หลังโอนย้ายโปรแกรมเครื่องนี้จะล็อกทันที"):
+                return
+            success, msg, transfer_code = LicenseManager.transfer_license()
+            if success:
+                # แสดงผลรหัสโอนย้าย
+                transfer_win = ctk.CTkToplevel(self)
+                transfer_win.title("รหัสโอนย้าย License")
+                transfer_win.geometry("550x300")
+                transfer_win.transient(self)
+                transfer_win.grab_set()
+                
+                ctk.CTkLabel(transfer_win, text="โอนย้ายสำเร็จ! ส่งรหัสนี้ให้ผู้ขายเพื่อรับ License Key ใหม่", font=FONTS["body"], wraplength=500).pack(pady=20)
+                
+                code_text = ctk.CTkTextbox(transfer_win, font=("Courier New", 11), height=100)
+                code_text.insert("1.0", transfer_code)
+                code_text.configure(state="disabled")
+                code_text.pack(fill="x", padx=20, pady=10)
+                
+                def copy_code():
+                    self.clipboard_clear()
+                    self.clipboard_append(transfer_code)
+                    messagebox.showinfo("สำเร็จ", "คัดลอกรหัสโอนย้ายแล้ว!")
+                    
+                ctk.CTkButton(transfer_win, text="Copy รหัส", font=FONTS["button"], command=copy_code).pack(pady=10)
+                self.create_license_tab()
+            else:
+                messagebox.showerror("ผิดพลาด", msg)
+                
+        # ปุ่มโอนย้าย
+        ctk.CTkButton(
+            btn_container,
+            text="↩️ โอนย้าย License",
+            font=FONTS["button"],
+            width=180,
+            height=45,
+            fg_color=COLORS["warning"],
+            command=run_transfer
+        ).pack(side="left", padx=5)
+        
+        def run_disable():
+            if not messagebox.askyesno("ยืนยันปิดใช้งาน", "คุณแน่ใจว่าต้องการยกเลิกสิทธิ์การใช้งานบนเครื่องนี้ใช่หรือไม่?\n\n⚠️ เมื่อลบแล้วโปรแกรมจะปิดตัวลงทันที"):
+                return
+            if LicenseManager.delete_license():
+                messagebox.showinfo("สำเร็จ", "ลบ License และยกเลิกสิทธิ์สำเร็จ!")
+                self.winfo_toplevel().quit()
+            else:
+                messagebox.showerror("ผิดพลาด", "ไม่สามารถลบ License ได้")
+                
+        # ปุ่มปิดใช้งาน
+        ctk.CTkButton(
+            btn_container,
+            text="🚫 ปิดใช้งานสิทธิ์",
+            font=FONTS["button"],
+            width=180,
+            height=45,
+            fg_color=COLORS["danger"],
+            command=run_disable
+        ).pack(side="left", padx=5)
+
     def load_settings(self):
         """โหลดการตั้งค่า"""
         self.db.connect()
