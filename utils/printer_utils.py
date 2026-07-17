@@ -221,6 +221,11 @@ class PrinterManager:
         cashier = receipt_data.get('cashier', '-')
         if show_cashier and cashier and cashier != '-':
             add_left(f"พนักงาน: {cashier}")
+        
+        cust_name = receipt_data.get('customer_name')
+        if cust_name:
+            add_left(f"สมาชิก: {cust_name}")
+            
         add_separator()
         
         # รายการสินค้า
@@ -260,6 +265,26 @@ class PrinterManager:
         draw_ops.append(('blank', None, font, None))
         for msg_line in receipt_message.split('\n'):
             add_center(msg_line)
+            
+        # วาดรูป QR Code ท้ายใบเสร็จ
+        try:
+            from database import DatabaseManager
+            db = DatabaseManager()
+            db.connect()
+            qr_setting = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key = 'payment_qr_path'")
+            db.disconnect()
+            if qr_setting and qr_setting['setting_value'].strip():
+                qr_path = qr_setting['setting_value'].strip()
+                if os.path.exists(qr_path):
+                    from PIL import Image
+                    qr_img = Image.open(qr_path).convert("1")
+                    # ปรับขนาดตามหน้ากระดาษ (ประมาณ 40% ของพื้นที่กระดาษ)
+                    target_w = int(paper_width * 0.4)
+                    qr_img = qr_img.resize((target_w, target_w), Image.Resampling.LANCZOS)
+                    draw_ops.append(('blank', None, font, None))
+                    draw_ops.append(('image', qr_img, font, None))
+        except Exception as e:
+            self.log_debug(f"Error loading QR Code for ESC/POS: {e}")
         
         # === คำนวณความสูงรวม ===
         total_height = 15  # top padding
@@ -312,6 +337,13 @@ class PrinterManager:
                 bbox = f.getbbox(right_text)
                 rw = (bbox[2] - bbox[0]) if bbox else 0
                 draw.text((paper_width - rw - 3, y), right_text, font=f, fill=0)
+                
+            elif op_type == 'image':
+                img_w, img_h = text.size
+                x = max(0, (paper_width - img_w) // 2)
+                img.paste(text, (x, y))
+                y += img_h
+                continue
             
             y += h
         
@@ -740,6 +772,10 @@ class PrinterManager:
             if show_cashier and cashier and cashier != '-':
                 draw_left_right("พนักงาน: " + cashier, "", font_body)
                 
+            cust_name = receipt_data.get('customer_name')
+            if cust_name:
+                draw_left_right("สมาชิก: " + cust_name, "", font_body)
+                
             draw_separator()
             
             # 4. รายการสินค้า
@@ -802,6 +838,29 @@ class PrinterManager:
             # 6. ข้อความท้ายบิล
             for line in receipt_message.split('\n'):
                 draw_centered(line, font_body)
+                
+            # วาดรูป QR Code ท้ายใบเสร็จในระบบ GDI
+            try:
+                from database import DatabaseManager
+                db = DatabaseManager()
+                db.connect()
+                qr_setting = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key = 'payment_qr_path'")
+                db.disconnect()
+                if qr_setting and qr_setting['setting_value'].strip():
+                    qr_path = qr_setting['setting_value'].strip()
+                    if os.path.exists(qr_path):
+                        from PIL import Image, ImageWin
+                        qr_img = Image.open(qr_path).convert("L")
+                        target_w = int(page_width * 0.4)
+                        qr_img = qr_img.resize((target_w, target_w), Image.Resampling.LANCZOS)
+                        
+                        dib = ImageWin.Dib(qr_img)
+                        x_pos = (page_width - target_w) // 2
+                        y += int(10 * dpi_y / 72)
+                        dib.draw(hdc.GetSafeHdc(), (x_pos, y, x_pos + target_w, y + target_w))
+                        y += target_w + int(10 * dpi_y / 72)
+            except Exception as e:
+                self.log_debug(f"GDI Print: Error printing QR Code image: {e}")
                 
             hdc.EndPage()
             hdc.EndDoc()

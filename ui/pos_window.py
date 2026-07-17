@@ -221,6 +221,18 @@ class POSFrame(ctk.CTkFrame):
             
             if hasattr(self, 'member_combo'):
                 self.member_var.set(session.get('member_name', "-- เลือกสมาชิก --"))
+                if hasattr(self, 'member_privilege_label'):
+                    if self.selected_member_id:
+                        try:
+                            self.db.connect()
+                            m = self.db.fetch_one("SELECT privilege FROM members WHERE member_id = ?", (self.selected_member_id,))
+                            self.db.disconnect()
+                            priv = m['privilege'] if m else None
+                            self.member_privilege_label.configure(text=f"🎁 สิทธิ์: {priv or 'ไม่มีสิทธิพิเศษ'}")
+                        except:
+                            self.member_privilege_label.configure(text="")
+                    else:
+                        self.member_privilege_label.configure(text="")
                 
             if self.vat_enabled:
                 self.vat_checkbox.select()
@@ -375,6 +387,14 @@ class POSFrame(ctk.CTkFrame):
             command=self.on_member_selected
         )
         self.member_combo.pack(side="left", padx=5)
+        
+        self.member_privilege_label = ctk.CTkLabel(
+            member_frame,
+            text="",
+            font=("Sarabun", 12, "bold"),
+            text_color=COLORS["success"]
+        )
+        self.member_privilege_label.pack(side="left", padx=15)
         
         # ส่วนลด
         discount_frame = ctk.CTkFrame(parent, fg_color="white", corner_radius=0)
@@ -614,6 +634,8 @@ class POSFrame(ctk.CTkFrame):
         """เมื่อเลือกสมาชิก คำนวณส่วนลดสมาชิกอัตโนมัติ"""
         if val == "-- เลือกสมาชิก --":
             self.selected_member_id = None
+            if hasattr(self, 'member_privilege_label'):
+                self.member_privilege_label.configure(text="")
             self.discount_entry.delete(0, 'end')
             self.discount_entry.insert(0, "0")
             self.discount_type_combo.set("บาท")
@@ -639,6 +661,11 @@ class POSFrame(ctk.CTkFrame):
             
             if not m:
                 return
+                
+            # แสดงรายละเอียดสิทธิประโยชน์
+            privilege = m['privilege'] or "ไม่มีสิทธิพิเศษ"
+            if hasattr(self, 'member_privilege_label'):
+                self.member_privilege_label.configure(text=f"🎁 สิทธิ์: {privilege}")
                 
             # คำนวณส่วนลด
             disc_type = m['discount_type']

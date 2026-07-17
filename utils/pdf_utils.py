@@ -173,6 +173,10 @@ def create_receipt_pdf(receipt_data, filename=None, paper_size="A4"):
         story.append(Paragraph(f"เลขที่: {receipt_data.get('sale_number', '-')}", left_style))
         story.append(Paragraph(f"วันที่: {date_str} {time_str}", left_style))
         
+        cust_name = receipt_data.get('customer_name')
+        if cust_name:
+            story.append(Paragraph(f"สมาชิก: {cust_name}", left_style))
+        
         story.append(Paragraph("-" * 40, normal_style))
         
         # 4. รายการสินค้า (loop สร้าง paragraph แทน table เพื่อความ simple)
@@ -266,6 +270,41 @@ def create_receipt_pdf(receipt_data, filename=None, paper_size="A4"):
         
         # 6. Footer message
         story.append(Paragraph("ขอบคุณที่ใช้บริการ", normal_style))
+        
+        # วาดรูป QR Code ท้ายใบเสร็จ PDF
+        try:
+            from database import DatabaseManager
+            db = DatabaseManager()
+            db.connect()
+            qr_setting = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key = 'payment_qr_path'")
+            db.disconnect()
+            if qr_setting and qr_setting['setting_value'].strip():
+                qr_path = Path(qr_setting['setting_value'].strip())
+                if qr_path.exists():
+                    from reportlab.platypus import Image as RLImage
+                    # ปรับขนาดตามหน้ากระดาษ
+                    if paper_size == "58mm":
+                        qr_w = 20 * mm
+                        qr_h = 20 * mm
+                    elif paper_size == "80mm":
+                        qr_w = 30 * mm
+                        qr_h = 30 * mm
+                    else: # A4 / A5
+                        qr_w = 40 * mm
+                        qr_h = 40 * mm
+                    
+                    qr_flowable = RLImage(str(qr_path), width=qr_w, height=qr_h)
+                    t_qr = Table([[qr_flowable]])
+                    t_qr.setStyle(TableStyle([
+                        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                        ('LEFTPADDING', (0,0), (-1,-1), 0),
+                        ('RIGHTPADDING', (0,0), (-1,-1), 0),
+                        ('TOPPADDING', (0,0), (-1,-1), 3*mm),
+                        ('BOTTOMPADDING', (0,0), (-1,-1), 3*mm),
+                    ]))
+                    story.append(t_qr)
+        except Exception as e:
+            print(f"Error rendering PDF QR Code: {e}")
         
         doc.build(story)
         return True
