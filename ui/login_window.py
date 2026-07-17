@@ -77,6 +77,26 @@ class LoginWindow:
         )
         subtitle_label.pack(pady=(0, 20))
         
+        # ตรวจสอบสิทธิ์ว่ามีข้อมูลทดลองใช้งานหรือไม่
+        trial_info_text = None
+        try:
+            from utils.license_system import LicenseManager
+            is_val, msg, lic_data = LicenseManager.check_activation()
+            if lic_data and lic_data.get('is_trial'):
+                days_left = lic_data.get('days_left', 0)
+                trial_info_text = f"⚠️ เวอร์ชันทดลองใช้งาน (คงเหลือ {days_left} วัน)"
+        except Exception:
+            pass
+
+        if trial_info_text:
+            trial_badge = ctk.CTkLabel(
+                logo_frame,
+                text=trial_info_text,
+                font=("Sarabun", 13, "bold"),
+                text_color="#FFEB3B"
+            )
+            trial_badge.pack(pady=(0, 15))
+            
         # ฟอร์มล็อกอิน
         login_frame = ctk.CTkFrame(main_frame, fg_color="white", corner_radius=15)
         login_frame.pack(fill="both", expand=True)
