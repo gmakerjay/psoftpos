@@ -107,6 +107,8 @@ class DatabaseManager:
                     phone TEXT,
                     email TEXT,
                     username TEXT UNIQUE,
+                    address TEXT,
+                    privilege TEXT,
                     status TEXT DEFAULT 'active',
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     expire_date TEXT,
@@ -141,6 +143,16 @@ class DatabaseManager:
             if 'is_archived' not in columns:
                 log_info("Altering sales table to add is_archived column...")
                 self.cursor.execute("ALTER TABLE sales ADD COLUMN is_archived INTEGER DEFAULT 0")
+
+            # เพิ่มคอลัมน์ points_earned ในตาราง sales ถ้ายังไม่มี
+            if 'points_earned' not in columns:
+                log_info("Altering sales table to add points_earned column...")
+                self.cursor.execute("ALTER TABLE sales ADD COLUMN points_earned INTEGER DEFAULT 0")
+
+            # เพิ่มคอลัมน์ points_used ในตาราง sales ถ้ายังไม่มี
+            if 'points_used' not in columns:
+                log_info("Altering sales table to add points_used column...")
+                self.cursor.execute("ALTER TABLE sales ADD COLUMN points_used INTEGER DEFAULT 0")
                 
             # เพิ่มคอลัมน์ is_archived ในตาราง returns ถ้ายังไม่มี
             self.cursor.execute("PRAGMA table_info(returns)")
@@ -148,6 +160,16 @@ class DatabaseManager:
             if 'is_archived' not in returns_columns:
                 log_info("Altering returns table to add is_archived column...")
                 self.cursor.execute("ALTER TABLE returns ADD COLUMN is_archived INTEGER DEFAULT 0")
+
+            # เพิ่มคอลัมน์ address และ privilege ในตาราง members ถ้ายังไม่มี
+            self.cursor.execute("PRAGMA table_info(members)")
+            members_columns = [col[1] for col in self.cursor.fetchall()]
+            if 'address' not in members_columns:
+                log_info("Altering members table to add address column...")
+                self.cursor.execute("ALTER TABLE members ADD COLUMN address TEXT")
+            if 'privilege' not in members_columns:
+                log_info("Altering members table to add privilege column...")
+                self.cursor.execute("ALTER TABLE members ADD COLUMN privilege TEXT")
                 
             # 3. สร้าง Index เพื่อความเร็วในการค้นหา
             self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_members_phone ON members(phone)")

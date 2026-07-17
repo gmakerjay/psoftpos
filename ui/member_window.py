@@ -94,13 +94,11 @@ class MemberManagementFrame(ctk.CTkFrame):
         headers = [
             ("ID", 50),
             ("ชื่อสมาชิก", 150),
-            ("เบอร์โทร", 110),
-            ("ระดับ (Tier)", 100),
-            ("สถานะ", 80),
-            ("วันหมดอายุ", 100),
-            ("ส่วนลดปัจจุบัน", 150),
-            ("สะสม (แต้ม/เงิน/Credit)", 200),
-            ("จัดการ", 250)
+            ("เบอร์โทร", 120),
+            ("ที่อยู่", 180),
+            ("สิทธิพิเศษ", 180),
+            ("แต้มสะสม", 100),
+            ("จัดการ", 150)
         ]
         
         for text, w in headers:
@@ -130,8 +128,8 @@ class MemberManagementFrame(ctk.CTkFrame):
         
         search_val = self.search_entry.get().strip()
         if search_val:
-            query += " WHERE m.name LIKE ? OR m.phone LIKE ? OR m.username LIKE ?"
-            params = [f"%{search_val}%", f"%{search_val}%", f"%{search_val}%"]
+            query += " WHERE m.name LIKE ? OR m.phone LIKE ? OR m.address LIKE ? OR m.privilege LIKE ?"
+            params = [f"%{search_val}%", f"%{search_val}%", f"%{search_val}%", f"%{search_val}%"]
             
         query += " ORDER BY m.member_id DESC"
         
@@ -159,42 +157,22 @@ class MemberManagementFrame(ctk.CTkFrame):
             # Name
             ctk.CTkLabel(row, text=member['name'], font=FONTS["body"], width=150, anchor="w").pack(side="left", padx=3)
             # Phone
-            ctk.CTkLabel(row, text=member['phone'] or '-', font=FONTS["body"], width=110).pack(side="left", padx=3)
-            # Tier
-            ctk.CTkLabel(row, text=member['tier_name'] or 'General', font=("Sarabun", 13, "bold"), width=100).pack(side="left", padx=3)
-            # Status
-            status_color = COLORS["success"] if member['status'] == 'active' else COLORS["danger"]
-            status_text = "ใช้งาน" if member['status'] == 'active' else "ระงับ"
-            ctk.CTkLabel(row, text=status_text, font=FONTS["body"], text_color=status_color, width=80).pack(side="left", padx=3)
-            # Expire Date
-            ctk.CTkLabel(row, text=member['expire_date'] or 'ไม่มีวันหมดอายุ', font=FONTS["small"], width=100).pack(side="left", padx=3)
-            
-            # Current Discount Summary
-            disc_sum = ""
-            if member['discount_type'] == 'percent':
-                disc_sum = f"ลด {member['discount_value']}%"
-            elif member['discount_type'] == 'amount':
-                disc_sum = f"ลด {member['discount_value']} บาท"
-            else:
-                disc_sum = f"ลดตาม Tier ({member['tier_discount'] or 0}%)"
-                
-            if member['discount_duration'] == 'temporary':
-                disc_sum += " (ชั่วคราว)"
-            ctk.CTkLabel(row, text=disc_sum, font=FONTS["small"], width=150, anchor="w").pack(side="left", padx=3)
-            
-            # Credit / Points / Wallet
-            accum = f"แต้ม: {member['points'] or 0} | Wallet: ฿{member['wallet_balance'] or 0.0:.2f}"
-            ctk.CTkLabel(row, text=accum, font=FONTS["small"], width=200, anchor="w").pack(side="left", padx=3)
+            ctk.CTkLabel(row, text=member['phone'] or '-', font=FONTS["body"], width=120).pack(side="left", padx=3)
+            # Address
+            ctk.CTkLabel(row, text=member['address'] or '-', font=FONTS["body"], width=180, anchor="w").pack(side="left", padx=3)
+            # Privilege
+            ctk.CTkLabel(row, text=member['privilege'] or '-', font=FONTS["body"], width=180, anchor="w").pack(side="left", padx=3)
+            # Points
+            ctk.CTkLabel(row, text=f"{member['points'] or 0} แต้ม", font=("Sarabun", 13, "bold"), text_color=COLORS["success"], width=100).pack(side="left", padx=3)
             
             # Action Buttons
-            btn_frame = ctk.CTkFrame(row, fg_color="transparent", width=250)
+            btn_frame = ctk.CTkFrame(row, fg_color="transparent", width=150)
             btn_frame.pack(side="left", padx=3)
             btn_frame.pack_propagate(False)
             
-            ctk.CTkButton(btn_frame, text="👁️", font=("Arial", 14), width=35, height=30, fg_color=COLORS["info"], command=lambda m=member: self.view_member_history(m)).pack(side="left", padx=2)
-            ctk.CTkButton(btn_frame, text="✏️", font=("Arial", 14), width=35, height=30, fg_color=COLORS["warning"], command=lambda m=member: self.show_edit_member_dialog(m)).pack(side="left", padx=2)
-            ctk.CTkButton(btn_frame, text="💰", font=("Arial", 14), width=35, height=30, fg_color=COLORS["secondary"], command=lambda m=member: self.show_credit_adjust_dialog(m)).pack(side="left", padx=2)
-            ctk.CTkButton(btn_frame, text="🗑️", font=("Arial", 14), width=35, height=30, fg_color=COLORS["danger"], command=lambda m_id=member['member_id']: self.delete_member(m_id)).pack(side="left", padx=2)
+            ctk.CTkButton(btn_frame, text="👁️", font=("Arial", 14), width=40, height=30, fg_color=COLORS["info"], command=lambda m=member: self.view_member_history(m)).pack(side="left", padx=2)
+            ctk.CTkButton(btn_frame, text="✏️", font=("Arial", 14), width=40, height=30, fg_color=COLORS["warning"], command=lambda m=member: self.show_edit_member_dialog(m)).pack(side="left", padx=2)
+            ctk.CTkButton(btn_frame, text="🗑️", font=("Arial", 14), width=40, height=30, fg_color=COLORS["danger"], command=lambda m_id=member['member_id']: self.delete_member(m_id)).pack(side="left", padx=2)
 
     def show_add_member_dialog(self):
         self.show_member_dialog("เพิ่มสมาชิก")
@@ -205,7 +183,7 @@ class MemberManagementFrame(ctk.CTkFrame):
     def show_member_dialog(self, title, member=None):
         dialog = ctk.CTkToplevel(self)
         dialog.title(title)
-        dialog.geometry("600x750")
+        dialog.geometry("600x600")
         dialog.transient(self)
         dialog.grab_set()
         
@@ -215,10 +193,7 @@ class MemberManagementFrame(ctk.CTkFrame):
         
         ctk.CTkLabel(scroll, text=title, font=FONTS["heading"], text_color=COLORS["primary"]).pack(pady=(0, 20))
         
-        # 1. ข้อมูลส่วนตัว
-        ctk.CTkLabel(scroll, text="📋 ข้อมูลส่วนตัวสมาชิก", font=("Sarabun", 14, "bold"), text_color=COLORS["secondary"]).pack(anchor="w", pady=5)
-        
-        ctk.CTkLabel(scroll, text="ชื่อ-นามสกุล:", font=FONTS["body"]).pack(anchor="w")
+        ctk.CTkLabel(scroll, text="ชื่อ-นามสกุลสมาชิก:", font=FONTS["body"]).pack(anchor="w")
         name_entry = ctk.CTkEntry(scroll, width=500, height=35)
         name_entry.pack(pady=5)
         if member: name_entry.insert(0, member['name'] or '')
@@ -228,127 +203,43 @@ class MemberManagementFrame(ctk.CTkFrame):
         phone_entry.pack(pady=5)
         if member: phone_entry.insert(0, member['phone'] or '')
         
-        ctk.CTkLabel(scroll, text="อีเมล:", font=FONTS["body"]).pack(anchor="w")
-        email_entry = ctk.CTkEntry(scroll, width=500, height=35)
-        email_entry.pack(pady=5)
-        if member: email_entry.insert(0, member['email'] or '')
+        ctk.CTkLabel(scroll, text="ที่อยู่:", font=FONTS["body"]).pack(anchor="w")
+        address_entry = ctk.CTkEntry(scroll, width=500, height=35)
+        address_entry.pack(pady=5)
+        if member: address_entry.insert(0, member['address'] or '')
         
-        ctk.CTkLabel(scroll, text="Username (ถ้ามี):", font=FONTS["body"]).pack(anchor="w")
-        username_entry = ctk.CTkEntry(scroll, width=500, height=35)
-        username_entry.pack(pady=5)
-        if member: username_entry.insert(0, member['username'] or '')
+        ctk.CTkLabel(scroll, text="สิทธิพิเศษ / รายละเอียดเพิ่มเติม:", font=FONTS["body"]).pack(anchor="w")
+        privilege_entry = ctk.CTkEntry(scroll, width=500, height=35)
+        privilege_entry.pack(pady=5)
+        if member: privilege_entry.insert(0, member['privilege'] or '')
         
-        # 2. วันหมดอายุและสถานะ
-        ctk.CTkLabel(scroll, text="📅 สิทธิ์และสถานะการใช้งาน", font=("Sarabun", 14, "bold"), text_color=COLORS["secondary"]).pack(anchor="w", pady=(15, 5))
-        
-        # โหลด Tiers
-        self.db.connect()
-        tiers_list = self.db.fetch_all("SELECT * FROM member_tiers ORDER BY min_points")
-        self.db.disconnect()
-        tier_names = [t['tier_name'] for t in tiers_list]
-        tier_map = {t['tier_name']: t['tier_id'] for t in tiers_list}
-        
-        ctk.CTkLabel(scroll, text="ระดับสมาชิก:", font=FONTS["body"]).pack(anchor="w")
-        tier_combo = ctk.CTkComboBox(scroll, values=tier_names, width=500, height=35, state="readonly")
-        tier_combo.pack(pady=5)
-        if member:
-            # find tier_name
-            t_name = 'General'
-            for t in tiers_list:
-                if t['tier_id'] == member['tier_id']:
-                    t_name = t['tier_name']
-                    break
-            tier_combo.set(t_name)
-        else:
-            if tier_names: tier_combo.set(tier_names[0])
-            
-        ctk.CTkLabel(scroll, text="วันหมดอายุสมาชิก (รูปแบบ YYYY-MM-DD หรือปล่อยว่าง):", font=FONTS["body"]).pack(anchor="w")
-        expire_entry = ctk.CTkEntry(scroll, placeholder_text="YYYY-MM-DD", width=500, height=35)
-        expire_entry.pack(pady=5)
-        if member: expire_entry.insert(0, member['expire_date'] or '')
-        
-        ctk.CTkLabel(scroll, text="จำนวนสิทธิ์ใช้งาน License:", font=FONTS["body"]).pack(anchor="w")
-        license_entry = ctk.CTkEntry(scroll, width=500, height=35)
-        license_entry.pack(pady=5)
-        license_entry.insert(0, str(member['license_count'] if member else 0))
-        
-        # 3. ส่วนลดเพิ่มเติม
-        ctk.CTkLabel(scroll, text="🏷️ ตั้งค่าส่วนลดเฉพาะบุคคล (ไม่มีขีดจำกัด แก้ไขเมื่อไรก็ได้)", font=("Sarabun", 14, "bold"), text_color=COLORS["secondary"]).pack(anchor="w", pady=(15, 5))
-        
-        disc_type_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        disc_type_frame.pack(fill="x", pady=5)
-        
-        ctk.CTkLabel(disc_type_frame, text="ประเภทส่วนลด:", font=FONTS["body"]).pack(side="left")
-        disc_type_combo = ctk.CTkComboBox(disc_type_frame, values=["none", "percent", "amount"], width=150, height=35, state="readonly")
-        disc_type_combo.pack(side="left", padx=10)
-        disc_type_combo.set(member['discount_type'] if member else "none")
-        
-        ctk.CTkLabel(disc_type_frame, text="มูลค่าส่วนลด:", font=FONTS["body"]).pack(side="left")
-        disc_value_entry = ctk.CTkEntry(disc_type_frame, width=100, height=35)
-        disc_value_entry.pack(side="left", padx=10)
-        disc_value_entry.insert(0, str(member['discount_value'] if member else 0.0))
-        
-        disc_dur_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        disc_dur_frame.pack(fill="x", pady=5)
-        
-        ctk.CTkLabel(disc_dur_frame, text="ประเภทความกว้างเวลา:", font=FONTS["body"]).pack(side="left")
-        disc_dur_combo = ctk.CTkComboBox(disc_dur_frame, values=["permanent", "temporary"], width=150, height=35, state="readonly")
-        disc_dur_combo.pack(side="left", padx=10)
-        disc_dur_combo.set(member['discount_duration'] if member else "permanent")
-        
-        ctk.CTkLabel(scroll, text="หมายเหตุส่วนลดชั่วคราว (กำหนดวันที่เริ่มต้น-สิ้นสุด YYYY-MM-DD):", font=FONTS["small"]).pack(anchor="w")
-        dates_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        dates_frame.pack(fill="x", pady=2)
-        
-        disc_start_entry = ctk.CTkEntry(dates_frame, placeholder_text="เริ่ม YYYY-MM-DD", width=240, height=35)
-        disc_start_entry.pack(side="left", padx=(0, 10))
-        if member: disc_start_entry.insert(0, member['discount_start_date'] or '')
-        
-        disc_end_entry = ctk.CTkEntry(dates_frame, placeholder_text="สิ้นสุด YYYY-MM-DD", width=250, height=35)
-        disc_end_entry.pack(side="left")
-        if member: disc_end_entry.insert(0, member['discount_end_date'] or '')
-        
-        # หมายเหตุอื่นๆ
-        ctk.CTkLabel(scroll, text="หมายเหตุสมาชิก:", font=FONTS["body"]).pack(anchor="w", pady=(10, 0))
-        notes_entry = ctk.CTkEntry(scroll, width=500, height=35)
-        notes_entry.pack(pady=5)
-        if member: notes_entry.insert(0, member['notes'] or '')
+        ctk.CTkLabel(scroll, text="แต้มสะสมปัจจุบัน:", font=FONTS["body"]).pack(anchor="w")
+        points_entry = ctk.CTkEntry(scroll, width=500, height=35)
+        points_entry.pack(pady=5)
+        points_entry.insert(0, str(member['points'] if member else 0))
         
         def save():
             name = name_entry.get().strip()
             phone = phone_entry.get().strip()
-            email = email_entry.get().strip()
-            username = username_entry.get().strip() or None
-            expire_date = expire_entry.get().strip() or None
-            notes = notes_entry.get().strip()
+            address = address_entry.get().strip()
+            privilege = privilege_entry.get().strip()
             
             try:
-                license_cnt = int(license_entry.get().strip())
-                disc_val = float(disc_value_entry.get().strip())
+                points = int(points_entry.get().strip())
             except ValueError:
-                messagebox.showerror("ผิดพลาด", "กรุณากรอกตัวเลขจำนวนสิทธิ์และส่วนลดให้ถูกต้อง")
+                messagebox.showerror("ผิดพลาด", "กรุณากรอกแต้มสะสมให้เป็นตัวเลขจำนวนเต็ม")
                 return
                 
             if not name:
                 messagebox.showerror("ผิดพลาด", "กรุณากรอกชื่อ-นามสกุลสมาชิก")
                 return
                 
-            tier_id = tier_map.get(tier_combo.get())
-            
             data = {
                 'name': name,
                 'phone': phone,
-                'email': email,
-                'username': username,
-                'expire_date': expire_date,
-                'license_count': license_cnt,
-                'notes': notes,
-                'tier_id': tier_id,
-                'discount_type': disc_type_combo.get(),
-                'discount_value': disc_val,
-                'discount_duration': disc_dur_combo.get(),
-                'discount_start_date': disc_start_entry.get().strip() or None,
-                'discount_end_date': disc_end_entry.get().strip() or None
+                'address': address,
+                'privilege': privilege,
+                'points': points
             }
             
             self.db.connect()
@@ -357,6 +248,13 @@ class MemberManagementFrame(ctk.CTkFrame):
                 params = list(data.values()) + [member['member_id']]
                 success = self.db.execute(query, params)
             else:
+                # ตั้งค่าเริ่มต้นอื่นๆ ให้เข้ากันได้กับระดับสมาชิกทั่วไป (General Tier)
+                gen_tier = self.db.fetch_one("SELECT tier_id FROM member_tiers WHERE tier_name LIKE '%General%'")
+                tier_id = gen_tier['tier_id'] if gen_tier else 1
+                
+                data['tier_id'] = tier_id
+                data['status'] = 'active'
+                
                 query = "INSERT INTO members (" + ", ".join(data.keys()) + ") VALUES (" + ", ".join(["?" for _ in data]) + ")"
                 success = self.db.execute(query, list(data.values()))
             self.db.disconnect()
@@ -366,7 +264,7 @@ class MemberManagementFrame(ctk.CTkFrame):
                 dialog.destroy()
                 self.load_members()
             else:
-                messagebox.showerror("ผิดพลาด", "ไม่สามารถบันทึกข้อมูลได้ (ตรวจสอบ Username อาจซ้ำในระบบ)")
+                messagebox.showerror("ผิดพลาด", "ไม่สามารถบันทึกข้อมูลได้")
                 
         ctk.CTkButton(scroll, text="💾 บันทึกข้อมูล", font=("Sarabun", 16, "bold"), fg_color=COLORS["success"], height=45, command=save).pack(pady=30)
 
@@ -582,12 +480,12 @@ class MemberManagementFrame(ctk.CTkFrame):
         h_row.pack_propagate(False)
         
         headers = [
-            ("เลขบิล", 120),
-            ("วันที่/เวลา", 130),
-            ("จำนวนชิ้น", 80),
-            ("ยอดสุทธิ", 90),
-            ("ส่วนลด", 80),
-            ("วิธีชำระ", 80),
+            ("เลขบิล", 100),
+            ("วันที่/เวลา", 120),
+            ("จำนวนชิ้น", 60),
+            ("ยอดสุทธิ", 80),
+            ("แต้ม (ได้/ใช้)", 100),
+            ("วิธีชำระ", 70),
             ("พนักงานขาย", 100),
             ("รายการสินค้าที่ซื้อ", 180)
         ]
@@ -630,15 +528,21 @@ class MemberManagementFrame(ctk.CTkFrame):
                 except:
                     pass
                     
-                ctk.CTkLabel(row, text=sale['sale_number'], font=FONTS["body"], width=120).pack(side="left", padx=2)
-                ctk.CTkLabel(row, text=time_str, font=FONTS["body"], width=130).pack(side="left", padx=2)
-                ctk.CTkLabel(row, text=str(sale['item_count']), font=FONTS["body"], width=80).pack(side="left", padx=2)
-                ctk.CTkLabel(row, text=f"฿{sale['total_amount']:,.2f}", font=("Sarabun", 12, "bold"), text_color=COLORS["success"], width=90).pack(side="left", padx=2)
-                ctk.CTkLabel(row, text=f"฿{sale['discount_amount']:,.2f}", font=FONTS["body"], text_color=COLORS["danger"], width=80).pack(side="left", padx=2)
+                pts_earned = sale['points_earned'] if 'points_earned' in sale.keys() else 0
+                pts_used = sale['points_used'] if 'points_used' in sale.keys() else 0
+                if pts_earned is None: pts_earned = 0
+                if pts_used is None: pts_used = 0
+                pts_display = f"+{pts_earned} / -{pts_used}"
+                
+                ctk.CTkLabel(row, text=sale['sale_number'], font=FONTS["body"], width=100).pack(side="left", padx=2)
+                ctk.CTkLabel(row, text=time_str, font=FONTS["body"], width=120).pack(side="left", padx=2)
+                ctk.CTkLabel(row, text=str(sale['item_count']), font=FONTS["body"], width=60).pack(side="left", padx=2)
+                ctk.CTkLabel(row, text=f"฿{sale['total_amount']:,.2f}", font=("Sarabun", 12, "bold"), text_color=COLORS["success"], width=80).pack(side="left", padx=2)
+                ctk.CTkLabel(row, text=pts_display, font=FONTS["body"], text_color=COLORS["primary"], width=100).pack(side="left", padx=2)
                 
                 pm_text = "เงินสด" if sale['payment_method'] == 'cash' else "โอน/QR"
                 if sale['payment_method'] == 'mixed': pm_text = "ผสม"
-                ctk.CTkLabel(row, text=pm_text, font=FONTS["body"], width=80).pack(side="left", padx=2)
+                ctk.CTkLabel(row, text=pm_text, font=FONTS["body"], width=70).pack(side="left", padx=2)
                 
                 ctk.CTkLabel(row, text=sale['cashier_name'] or '-', font=FONTS["small"], width=100).pack(side="left", padx=2)
                 ctk.CTkLabel(row, text=sale['items_list'] or '-', font=FONTS["small"], width=180, anchor="w").pack(side="left", padx=2)

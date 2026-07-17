@@ -1089,7 +1089,13 @@ class POSFrame(ctk.CTkFrame):
         # สร้างหน้าต่าง
         dialog = ctk.CTkToplevel(self)
         dialog.title("ชำระเงิน")
-        dialog.geometry("520x550")
+        
+        # ปรับขนาดให้เหมาะสมหากมีสมาชิกเพื่อรองรับช่องใส่แต้ม
+        if self.selected_member_id:
+            dialog.geometry("520x620")
+        else:
+            dialog.geometry("520x550")
+            
         dialog.transient(self)
         dialog.grab_set()
         
@@ -1100,6 +1106,51 @@ class POSFrame(ctk.CTkFrame):
             font=("Sarabun", 24, "bold"),
             text_color=COLORS["success"]
         ).pack(pady=20)
+
+        # ข้อมูลสมาชิกและแต้มสะสม
+        points_used_var = ctk.StringVar(value="0")
+        member_points = 0
+        if self.selected_member_id:
+            try:
+                self.db.connect()
+                m_data = self.db.fetch_one("SELECT points, name FROM members WHERE member_id = ?", (self.selected_member_id,))
+                self.db.disconnect()
+                if m_data:
+                    member_points = m_data['points'] or 0
+                    member_name = m_data['name']
+                    
+                    # เฟรมข้อมูลแต้มสมาชิก
+                    member_pts_frame = ctk.CTkFrame(dialog, fg_color=COLORS["light"], corner_radius=8)
+                    member_pts_frame.pack(fill="x", padx=50, pady=5)
+                    
+                    ctk.CTkLabel(
+                        member_pts_frame,
+                        text=f"👤 สมาชิก: {member_name} (แต้มที่มี: {member_points} แต้ม)",
+                        font=FONTS["small"],
+                        text_color=COLORS["text_dark"]
+                    ).pack(pady=(5, 2))
+                    
+                    pts_use_row = ctk.CTkFrame(member_pts_frame, fg_color="transparent")
+                    pts_use_row.pack(fill="x", pady=(0, 5))
+                    
+                    ctk.CTkLabel(pts_use_row, text="ใช้แต้มในบิลนี้:", font=FONTS["small"]).pack(side="left", padx=(10, 5))
+                    pts_use_entry = ctk.CTkEntry(pts_use_row, textvariable=points_used_var, width=100, height=25, font=FONTS["small"], justify="center")
+                    pts_use_entry.pack(side="left")
+                    
+                    # ตรวจสอบแต้มไม่ให้เกินแต้มที่มี
+                    def validate_points_use(*args):
+                        try:
+                            val = int(points_used_var.get() or 0)
+                            if val < 0:
+                                points_used_var.set("0")
+                            elif val > member_points:
+                                points_used_var.set(str(member_points))
+                        except ValueError:
+                            points_used_var.set("0")
+                            
+                    points_used_var.trace_add("write", validate_points_use)
+            except Exception as e:
+                print(f"Error loading member points in checkout: {e}")
         
         # ช่องทางชำระเงิน
         ctk.CTkLabel(
@@ -1268,9 +1319,16 @@ class POSFrame(ctk.CTkFrame):
                     messagebox.showerror("ข้อผิดพลาด", "กรุณากรอกจำนวนเงินให้ถูกต้อง")
                     return
                     
+            points_used = 0
+            if self.selected_member_id:
+                try:
+                    points_used = int(points_used_var.get() or 0)
+                except ValueError:
+                    points_used = 0
+                    
             self.process_payment(
                 dialog, total, subtotal, discount_amount, 
-                tax_amount, str(paid_val), method_db, details_db
+                tax_amount, str(paid_val), method_db, details_db, points_used=points_used
             )
 
         confirm_btn = ctk.CTkButton(
@@ -1290,7 +1348,7 @@ class POSFrame(ctk.CTkFrame):
         transfer_paid_entry.bind("<Return>", do_payment)
         dialog.bind("<Return>", do_payment)
     
-    def process_payment(self, dialog, total, subtotal, discount_amount, tax_amount, paid_str, payment_method="cash", payment_details=None):
+    def process_payment(self, dialog, total, subtotal, discount_amount, tax_amount, paid_str, payment_method="cash", payment_details=None, points_used=0):
         """ประมวลผลการชำระเงิน"""
         try:
             paid = float(paid_str)
@@ -1304,6 +1362,11 @@ class POSFrame(ctk.CTkFrame):
         
         change = paid - total
         
+        # คำนวณแต้มสะสม
+        points_earned = 0
+        if self.selected_member_id:
+            points_earned = int(total // 100)
+            
         # บันทึกการขาย (ใช้ Transaction เพื่อความปลอดภัยของข้อมูล)
         self.db.connect()
         self.db.begin_transaction()
@@ -1318,14 +1381,16 @@ class POSFrame(ctk.CTkFrame):
                     sale_number, sale_date, user_id, price_type,
                     subtotal, discount_type, discount_value, discount_amount,
                     tax_amount, total_amount, paid_amount, change_amount,
-                    payment_method, status, member_id, payment_details
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    payment_method, status, member_id, payment_details,
+                    points_earned, points_used
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 sale_number, sale_date, self.user_id, self.price_type,
                 subtotal, self.discount_type_combo.get(), 
                 self.discount_entry.get(), discount_amount,
                 tax_amount, total, paid, change,
-                payment_method, 'completed', self.selected_member_id, payment_details
+                payment_method, 'completed', self.selected_member_id, payment_details,
+                points_earned, points_used
             ))
             
             if not success:
@@ -1338,14 +1403,12 @@ class POSFrame(ctk.CTkFrame):
             )
             sale_id = sale['sale_id']
             
-            # ปรับแต้มสมาชิกสะสม (1 แต้ม ต่อทุกๆ 100 บาท)
+            # ปรับแต้มสมาชิกสะสม (หักแต้มที่ใช้ และ เพิ่มแต้มที่ได้รับ)
             if self.selected_member_id:
-                points_earned = int(total // 100)
-                if points_earned > 0:
-                    self.db.execute(
-                        "UPDATE members SET points = points + ? WHERE member_id = ?",
-                        (points_earned, self.selected_member_id)
-                    )
+                self.db.execute(
+                    "UPDATE members SET points = MAX(0, points - ? + ?) WHERE member_id = ?",
+                    (points_used, points_earned, self.selected_member_id)
+                )
             
             # บันทึกรายการสินค้า
             for item in self.cart_items:
