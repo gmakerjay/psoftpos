@@ -149,8 +149,9 @@ class LoginWindow:
         self.login_button = ctk.CTkButton(
             login_frame,
             text="เข้าสู่ระบบ",
-            font=FONTS["button"],
-            height=45,
+            font=("Sarabun", 16, "bold"),
+            height=50,
+            corner_radius=25,
             fg_color=COLORS["primary"],
             hover_color=COLORS["secondary"],
             command=self.login
