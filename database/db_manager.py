@@ -416,6 +416,12 @@ class DatabaseManager:
             )
         """)
         
+        # ใส่ค่าเริ่มต้นสำหรับเครื่องพิมพ์ XP-58IIH
+        self.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('printer_type', 'thermal')")
+        self.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('paper_size', '58mm')")
+        self.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('printer_name', 'XP-58')")
+        self.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('printer_codepage', '18 (Xprinter, เครื่องจีนส่วนใหญ่)')")
+        
         # เพิ่ม Index เพื่อรองรับสินค้าจำนวนมาก (1000+)
         self.execute("CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode)")
         self.execute("CREATE INDEX IF NOT EXISTS idx_products_name ON products(product_name)")

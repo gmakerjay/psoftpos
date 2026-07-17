@@ -22,9 +22,10 @@ class PrinterManager:
     """จัดการการพิมพ์ใบเสร็จ (รองรับ ESC/POS, TSPL, Windows, PDF)"""
     
     def __init__(self):
-        self.printer_type = "pdf"      # pdf, windows, thermal
-        self.paper_size = "80mm"       # A4, A5, 80mm, 58mm, label
-        self.printer_name = None       # ชื่อเครื่องพิมพ์
+        self.printer_type = "thermal"  # pdf, windows, thermal
+        self.paper_size = "58mm"       # A4, A5, 80mm, 58mm, label
+        self.printer_name = "XP-58"    # ชื่อเครื่องพิมพ์
+        self.printer_codepage = "18"   # รหัสภาษาไทยเครื่องพิมพ์
         self.load_settings()
     
     def log_debug(self, message):
@@ -45,11 +46,13 @@ class PrinterManager:
             printer_type = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key = 'printer_type'")
             paper_size = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key = 'paper_size'")
             printer_name = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key = 'printer_name'")
+            printer_codepage = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key = 'printer_codepage'")
             db.disconnect()
             
             if printer_type: self.printer_type = printer_type['setting_value']
             if paper_size: self.paper_size = paper_size['setting_value']
             if printer_name: self.printer_name = printer_name['setting_value']
+            if printer_codepage: self.printer_codepage = printer_codepage['setting_value']
         except Exception as e:
             self.log_debug(f"Error loading settings: {e}")
     
@@ -78,6 +81,16 @@ class PrinterManager:
             receipt_data['items'] = new_items
 
         try:
+            # Safety: ตรวจจับเครื่องพิมพ์ thermal ที่ตั้งค่าผิดเป็นโหมด windows (GDI)
+            # GDI ไม่รองรับ font ภาษาไทยบนเครื่อง thermal → ตัวอักษรเพี้ยน (mojibake)
+            # แก้ปัญหาซ้ำๆ โดยบังคับใช้ ESC/POS เมื่อตรวจพบเครื่อง thermal
+            thermal_keywords = ["XP-58", "XP-80", "XP58", "XP80", "POS-58", "POS-80", "POS58", "POS80"]
+            is_thermal_printer = self.printer_name and any(kw.lower() in self.printer_name.lower() for kw in thermal_keywords)
+            
+            if is_thermal_printer and self.printer_type == "windows":
+                self.log_debug(f"⚠️ Auto-redirect: Printer '{self.printer_name}' is thermal but configured as 'windows'. Switching to ESC/POS to fix Thai encoding.")
+                self.printer_type = "thermal"  # แก้ไขชั่วคราวในหน่วยความจำ (ไม่เขียนกลับ DB)
+            
             if self.printer_type == "thermal":
                 # Thermal → ส่ง RAW โดยตรง (ไม่เปิด PDF)
                 if self.printer_name and "Xprinter" in self.printer_name:
@@ -102,147 +115,129 @@ class PrinterManager:
     # =====================================================
     
     def print_thermal_escpos(self, receipt_data):
-        """พิมพ์ตรง ESC/POS สำหรับเครื่องพิมพ์สลิป 58mm/80mm"""
+        """พิมพ์ตรง ESC/POS สำหรับเครื่องพิมพ์สลิป 58mm/80mm — ใช้ Bitmap Rendering (รองรับภาษาไทย 100%)"""
         try:
-            commands = self.generate_escpos_commands(receipt_data)
+            commands = self.generate_bitmap_receipt(receipt_data)
             result = self.send_raw_to_printer(commands)
-            self.log_debug(f"ESC/POS print result: {result}")
+            self.log_debug(f"ESC/POS Bitmap print result: {result}")
             return result
         except Exception as e:
-            self.log_debug(f"ESC/POS Error: {e}")
+            self.log_debug(f"ESC/POS Bitmap Error: {e}")
+            import traceback
+            self.log_debug(traceback.format_exc())
             return False
 
-    def print_tspl_label(self, receipt_data):
-        """สร้างคำสั่ง TSPL สำหรับเครื่อง Label (Xprinter)"""
-        try:
-            commands = []
-            commands.append(b"SIZE 4,4\r\n")
-            commands.append(b"GAP 0.12,0\r\n")
-            commands.append(b"DIRECTION 1\r\n")
-            commands.append(b"CLS\r\n")
-            
-            # ชื่อร้าน
-            commands.append(f"TEXT 50,30,\"THAI.TFF\",0,1,1,\"{COMPANY_INFO['name'][:30]}\"\r\n".encode('cp874', errors='ignore'))
-            commands.append(f"TEXT 50,70,\"3\",0,1,1,\"RECEIPT: {receipt_data['sale_number']}\"\r\n".encode('ascii'))
-            commands.append(b"BAR 50,110,400,2\r\n")
-            
-            y = 130
-            for item in receipt_data.get('items', []):
-                name = item.get('product_name', 'Item')[:25]
-                detail = f"{item['quantity']}x{item['unit_price']:,.0f} = {item['total_price']:,.0f}"
-                commands.append(f"TEXT 50,{y},\"THAI.TFF\",0,1,1,\"{name}\"\r\n".encode('cp874', errors='ignore'))
-                commands.append(f"TEXT 50,{y+30},\"2\",0,1,1,\"{detail}\"\r\n".encode('ascii'))
-                y += 70
-                if y > 800: break
-            
-            commands.append(f"BAR 50,{y},400,2\r\n".encode('ascii'))
-            total = receipt_data.get('total_amount', 0)
-            commands.append(f"TEXT 50,{y+20},\"THAI.TFF\",0,1,2,\"TOTAL: {total:,.2f} THB\"\r\n".encode('cp874', errors='ignore'))
-            
-            commands.append(b"PRINT 1,1\r\n")
-            return self.send_raw_to_printer(b"".join(commands))
-        except Exception as e:
-            self.log_debug(f"TSPL Error: {e}")
-            return False
+    # =====================================================
+    # Bitmap Receipt Rendering — แปลงใบเสร็จเป็นรูปภาพ
+    # รองรับภาษาไทย 100% โดยไม่พึ่ง Thai font ROM ในเครื่องพิมพ์
+    # =====================================================
 
-    def generate_escpos_commands(self, receipt_data):
-        """สร้างคำสั่ง ESC/POS มาตรฐาน (รองรับ 58mm/80mm)"""
-        ESC = b'\x1b'
-        GS = b'\x1d'
-        FS = b'\x1c'
-        commands = [
-            ESC + b'@',            # Hardware reset — clear all buffers and modes
-            FS + b'.',             # Cancel Chinese character mode (Kanji Mode Off)
-            ESC + b't\xff',        # Select character code table 255 = CP874 (Common Thai page for Xprinter/Chinese OEM)
-            FS + b'C\x01',         # Select Thai TIS-620 font mode (FS C \x01)
-            ESC + b'R\x00',        # Select international character set 0 (USA — base ASCII)
-        ]  # Init + Cancel Chinese + Select Thai CP874 + Enable Thai Font Mode
-        width = 32 if self.paper_size == "58mm" else 48
+    def _get_thai_font(self, size):
+        """โหลดฟอนต์ภาษาไทยสำหรับ render bitmap"""
+        from PIL import ImageFont
+        from pathlib import Path
         
-        # ดึงการตั้งค่าล่าสุดจาก Database เสมอ เพื่อการันตีว่าค่าที่บันทึกส่งผลจริงทันที 100%
+        base_dir = Path(__file__).resolve().parent.parent
+        font_paths = [
+            base_dir / "FC Sara Samkan [Non-commercial] Bold.ttf",
+            base_dir / "assets" / "FC Sara Samkan [Non-commercial] Bold.ttf",
+        ]
+        
+        for fp in font_paths:
+            if fp.exists():
+                return ImageFont.truetype(str(fp), size)
+        
+        # Fallback: ใช้ฟอนต์ที่ติดตั้งในระบบ
+        for fallback in ["Tahoma", "Angsana New", "Cordia New", "TH Sarabun New", "Arial"]:
+            try:
+                return ImageFont.truetype(fallback, size)
+            except Exception:
+                continue
+        
+        # Last resort
+        return ImageFont.load_default()
+
+    def _render_receipt_image(self, receipt_data):
+        """Render ใบเสร็จเป็น PIL Image ขาวดำ"""
+        from PIL import Image, ImageDraw
+        
+        paper_width = 384 if self.paper_size == "58mm" else 576  # dots (203 DPI)
+        
+        font_size = 18 if self.paper_size == "58mm" else 22
+        font = self._get_thai_font(font_size)
+        font_bold = self._get_thai_font(font_size + 4)
+        font_small = self._get_thai_font(font_size - 4)
+        
+        line_h = font_size + 8
+        bold_h = font_size + 14
+        sep_char = '-'
+        
+        # ดึงการตั้งค่าจาก Database
         company_name = "ชื่อร้านค้า"
         receipt_message = "ขอบคุณที่ใช้บริการ\nยินดีให้บริการ"
         show_cashier = True
-        show_barcode = True
         
         try:
             from database import DatabaseManager
             db = DatabaseManager()
             db.connect()
             
-            # ดึงชื่อร้าน
             name_setting = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key = 'company_name'")
             if name_setting and name_setting['setting_value'].strip():
                 company_name = name_setting['setting_value']
                 
-            # ดึงข้อความท้ายบิล
             msg_setting = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key = 'receipt_message'")
             if msg_setting and msg_setting['setting_value'].strip():
                 receipt_message = msg_setting['setting_value']
                 
-            # ดึงการตั้งค่าแสดงผลพนักงานขาย
             cashier_setting = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key = 'receipt_show_cashier'")
             if cashier_setting:
                 show_cashier = cashier_setting['setting_value'] == 'True'
                 
-            # ดึงการตั้งค่าแสดงผลบาร์โค้ด
-            barcode_setting = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key = 'receipt_show_barcode'")
-            if barcode_setting:
-                show_barcode = barcode_setting['setting_value'] == 'True'
-                
             db.disconnect()
         except Exception:
-            # Fallback ไปที่ COMPANY_INFO หรือค่าเริ่มต้นหากเชื่อมต่อฐานข้อมูลล้มเหลว
             company_name = COMPANY_INFO.get('name', 'ชื่อร้านค้า')
-            
-        # จัดกลาง + ตัวหนา — ชื่อร้าน
-        commands.append(ESC + b'a' + b'\x01')  # Center align
-        commands.append(ESC + b'E' + b'\x01')  # Bold ON
-        commands.append(company_name.encode('cp874', errors='ignore') + b'\n')
-        commands.append(ESC + b'E' + b'\x00')  # Bold OFF
-        commands.append(ESC + b'a' + b'\x00')  # Left align
+        
+        # === สร้างรายการบรรทัดที่จะพิมพ์ ===
+        # แต่ละบรรทัดเป็น tuple: (text, font, align, left_right_pair)
+        # align: 'left', 'center', 'right', 'lr' (left-right split)
+        draw_ops = []
+        
+        def add_center(text, f=None):
+            draw_ops.append(('center', text, f or font, None))
+        def add_left(text, f=None):
+            draw_ops.append(('left', text, f or font, None))
+        def add_lr(left, right, f=None):
+            draw_ops.append(('lr', left, f or font, right))
+        def add_separator():
+            draw_ops.append(('sep', None, font, None))
+        
+        # ชื่อร้าน
+        add_center(company_name, font_bold)
         
         # ข้อมูลบิล
-        commands.append(f"เลขที่: {receipt_data['sale_number']}\n".encode('cp874', errors='ignore'))
-        commands.append(f"วันที่: {receipt_data.get('sale_date', '-')}\n".encode('cp874', errors='ignore'))
+        add_left(f"เลขที่: {receipt_data['sale_number']}")
+        add_left(f"วันที่: {receipt_data.get('sale_date', '-')}")
         cashier = receipt_data.get('cashier', '-')
         if show_cashier and cashier and cashier != '-':
-            commands.append(f"พนักงาน: {cashier}\n".encode('cp874', errors='ignore'))
-        commands.append(b'-' * width + b'\n')
+            add_left(f"พนักงาน: {cashier}")
+        add_separator()
         
         # รายการสินค้า
         for item in receipt_data.get('items', []):
             name = item.get('product_name', 'Item')
-            # ตัดชื่อให้พอดีกับความกว้าง
-            if len(name) > width - 2:
-                name = name[:width - 4] + ".."
-            commands.append(name.encode('cp874', errors='ignore') + b'\n')
+            add_left(name)
             
             qty = item.get('quantity', 0)
             price = item.get('unit_price', 0)
             total = item.get('total_price', 0)
             detail = f"  {qty} x {price:,.0f}"
             total_str = f"{total:,.0f}"
-            # จัดให้ Total ชิดขวา
-            spaces = width - len(detail) - len(total_str)
-            if spaces < 1: spaces = 1
-            line = detail + " " * spaces + total_str
-            commands.append(line.encode('ascii', errors='ignore') + b'\n')
-            
-        commands.append(b'-' * width + b'\n')
+            add_lr(detail, total_str)
+        
+        add_separator()
         
         # สรุปยอด
-        def right_align(label, value):
-            val_str = f"{value:,.2f}"
-            # คำนวณความกว้างตัวอักษรจริงของภาษาไทยโดยไม่นับรวมสระ/วรรณยุกต์ที่ซ้อนบนล่าง (เพราะไม่ใช้พื้นที่แนวนอน)
-            label_len = sum(1 for c in label if c not in [
-                '\u0e31', '\u0e34', '\u0e35', '\u0e36', '\u0e37', '\u0e38', '\u0e39', '\u0e3a',
-                '\u0e47', '\u0e48', '\u0e49', '\u0e4a', '\u0e4b', '\u0e4c', '\u0e4d', '\u0e4e'
-            ])
-            spaces = width - label_len - len(val_str)
-            if spaces < 1: spaces = 1
-            return (label + " " * spaces + val_str).encode('cp874', errors='ignore') + b'\n'
-        
         subtotal = receipt_data.get('subtotal', receipt_data.get('total_amount', 0))
         discount = receipt_data.get('discount_amount', 0)
         tax = receipt_data.get('tax_amount', 0)
@@ -251,43 +246,130 @@ class PrinterManager:
         change = receipt_data.get('change_amount', 0)
         
         if discount > 0:
-            commands.append(right_align("ยอดรวม:", subtotal))
-            commands.append(right_align("ส่วนลด:", discount))
+            add_lr("ยอดรวม:", f"{subtotal:,.2f}")
+            add_lr("ส่วนลด:", f"{discount:,.2f}")
         if tax > 0:
-            commands.append(right_align("ภาษี VAT:", tax))
+            add_lr("ภาษี VAT:", f"{tax:,.2f}")
         
-        # TOTAL ตัวหนา
-        commands.append(ESC + b'E' + b'\x01')  # Bold ON
-        commands.append(right_align("ยอดสุทธิ:", total))
-        commands.append(ESC + b'E' + b'\x00')  # Bold OFF
+        add_lr("ยอดสุทธิ:", f"{total:,.2f}", font_bold)
+        add_separator()
+        add_lr("รับเงิน:", f"{paid:,.2f}")
+        add_lr("เงินทอน:", f"{change:,.2f}")
         
-        commands.append(b'-' * width + b'\n')
-        commands.append(right_align("รับเงิน:", paid))
-        commands.append(right_align("เงินทอน:", change))
-        
-        # Barcode (ถ้าเปิดใช้งาน)
-        if show_barcode:
-            commands.append(ESC + b'a' + b'\x01')  # Center
-            commands.append(b'\x1d\x68\x3c')       # Height 60 dots
-            commands.append(b'\x1d\x77\x02')       # Width 2
-            commands.append(b'\x1d\x48\x02')       # HRI characters below barcode
-            barcode_data = receipt_data['sale_number'].encode('ascii')
-            commands.append(b'\x1d\x6b\x04' + barcode_data + b'\x00')
-            commands.append(b'\n')
-            commands.append(ESC + b'a' + b'\x00')  # Left
-            
         # Footer
-        commands.append(b'\n')
-        commands.append(ESC + b'a' + b'\x01')  # Center
-        for line in receipt_message.split('\n'):
-            commands.append(line.encode('cp874', errors='ignore') + b'\n')
-        commands.append(ESC + b'a' + b'\x00')  # Left
+        draw_ops.append(('blank', None, font, None))
+        for msg_line in receipt_message.split('\n'):
+            add_center(msg_line)
         
-        # ตัดกระดาษ (Feed 3 บรรทัด + Cut)
-        commands.append(b'\n\n\n')
-        commands.append(GS + b'V' + b'\x00')  # Full cut
+        # === คำนวณความสูงรวม ===
+        total_height = 15  # top padding
+        for op_type, text, f, _ in draw_ops:
+            if op_type == 'blank':
+                total_height += line_h // 2
+            elif op_type == 'sep':
+                total_height += line_h
+            elif f == font_bold:
+                total_height += bold_h
+            else:
+                total_height += line_h
+        total_height += 15  # bottom padding
         
-        return b"".join(commands)
+        # === วาดภาพ ===
+        img = Image.new('1', (paper_width, total_height), 1)  # 1 = white
+        draw = ImageDraw.Draw(img)
+        
+        y = 10
+        for op_type, text, f, extra in draw_ops:
+            if op_type == 'blank':
+                y += line_h // 2
+                continue
+            
+            if op_type == 'sep':
+                # วาดเส้นประ
+                bbox = f.getbbox(sep_char)
+                char_w = bbox[2] - bbox[0] if bbox else 6
+                num_chars = paper_width // char_w
+                draw.text((0, y), sep_char * num_chars, font=f, fill=0)
+                y += line_h
+                continue
+            
+            h = bold_h if f == font_bold else line_h
+            
+            if op_type == 'center':
+                bbox = f.getbbox(text)
+                tw = (bbox[2] - bbox[0]) if bbox else 0
+                x = max(0, (paper_width - tw) // 2)
+                draw.text((x, y), text, font=f, fill=0)
+            
+            elif op_type == 'left':
+                draw.text((3, y), text, font=f, fill=0)
+            
+            elif op_type == 'lr':
+                # ซ้าย
+                draw.text((3, y), text, font=f, fill=0)
+                # ขวา
+                right_text = extra
+                bbox = f.getbbox(right_text)
+                rw = (bbox[2] - bbox[0]) if bbox else 0
+                draw.text((paper_width - rw - 3, y), right_text, font=f, fill=0)
+            
+            y += h
+        
+        return img
+
+    def _image_to_escpos_raster(self, img):
+        """แปลง PIL Image (1-bit) เป็นคำสั่ง ESC/POS raster (GS v 0)"""
+        from PIL import Image
+        img = img.convert('1')
+        width, height = img.size
+        
+        width_bytes = (width + 7) // 8
+        
+        commands = bytearray()
+        
+        # GS v 0 m xL xH yL yH d1...dk
+        m = 0  # normal density
+        xL = width_bytes & 0xFF
+        xH = (width_bytes >> 8) & 0xFF
+        yL = height & 0xFF
+        yH = (height >> 8) & 0xFF
+        
+        commands += b'\x1d\x76\x30'  # GS v 0
+        commands += bytes([m, xL, xH, yL, yH])
+        
+        pixels = img.load()
+        for row in range(height):
+            row_data = bytearray(width_bytes)
+            for col in range(width):
+                if pixels[col, row] == 0:  # black pixel
+                    byte_idx = col // 8
+                    bit_idx = 7 - (col % 8)
+                    row_data[byte_idx] |= (1 << bit_idx)
+            commands += bytes(row_data)
+        
+        return bytes(commands)
+
+    def generate_bitmap_receipt(self, receipt_data):
+        """สร้างคำสั่ง ESC/POS แบบ Bitmap สำหรับใบเสร็จ (รองรับภาษาไทย 100%)"""
+        GS = b'\x1d'
+        
+        commands = bytearray()
+        
+        # Initialize printer
+        commands += b'\x1b\x40'  # ESC @
+        
+        # Render ใบเสร็จเป็นรูปภาพ
+        img = self._render_receipt_image(receipt_data)
+        self.log_debug(f"Bitmap receipt rendered: {img.size[0]}x{img.size[1]} pixels")
+        
+        # แปลงเป็น raster commands
+        commands += self._image_to_escpos_raster(img)
+        
+        # Feed + Cut
+        commands += b'\n\n\n'
+        commands += GS + b'V\x00'  # Full cut
+        
+        return bytes(commands)
 
     def send_raw_to_printer(self, data):
         """ส่งข้อมูลดิบไป Windows Spooler (สำหรับ thermal/label)"""
@@ -556,8 +638,20 @@ class PrinterManager:
             
             page_width = int((print_width_mm / 25.4) * dpi_x)
             
-            # สร้างฟอนต์
+            # โหลดฟอนต์ภาษาไทยของโปรเจกต์ชั่วคราวเพื่อให้ GDI เรียกใช้ได้โดยไม่ต้องติดตั้งลง Windows
             font_name = "Tahoma"
+            try:
+                import ctypes
+                from pathlib import Path
+                base_dir = Path(__file__).resolve().parent.parent
+                font_path = base_dir / "FC Sara Samkan [Non-commercial] Bold.ttf"
+                if font_path.exists():
+                    ctypes.windll.gdi32.AddFontResourceW(str(font_path))
+                    font_name = "FC Sara Samkan"
+            except Exception as e:
+                self.log_debug(f"GDI Print: Cannot load custom font resource: {e}")
+
+            # สร้างฟอนต์
             font_title = win32ui.CreateFont({
                 'name': font_name,
                 'height': int(title_sz * dpi_y / 72),

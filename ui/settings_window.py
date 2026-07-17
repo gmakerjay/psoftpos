@@ -700,6 +700,9 @@ class SettingsFrame(ctk.CTkFrame):
 
         if 'paper_size' in self.settings_dict:
             self.paper_size_var.set(self.settings_dict['paper_size'])
+
+        if 'printer_codepage' in self.settings_dict:
+            self.printer_codepage_var.set(self.settings_dict['printer_codepage'])
     
     def save_company_info(self):
         """บันทึกข้อมูลร้าน"""
@@ -784,6 +787,7 @@ class SettingsFrame(ctk.CTkFrame):
             'printer_type': self.printer_type_var.get(),
             'printer_name': self.printer_name_var.get(),
             'paper_size': self.paper_size_var.get(),
+            'printer_codepage': self.printer_codepage_var.get(),
         }
         
         self.db.connect()
@@ -802,10 +806,15 @@ class SettingsFrame(ctk.CTkFrame):
         messagebox.showinfo("สำเร็จ", "บันทึกการตั้งค่าเครื่องพิมพ์สำเร็จ!")
         
     def on_printer_select(self, printer_name):
-        """แนะนำการตั้งค่า GDI (windows) และ 58mm ทันทีเมื่อเลือกเครื่องพิมพ์ตระกูล XP-58 ใน UI ด้วยตนเอง"""
-        if printer_name and "XP-58" in printer_name:
-            self.printer_type_var.set("windows")
-            self.paper_size_var.set("58mm")
+        """แนะนำการตั้งค่าอัตโนมัติเมื่อเลือกเครื่องพิมพ์ — thermal สำหรับเครื่องพิมพ์สลิป (ภาษาไทยชัด)"""
+        if printer_name and ("XP-58" in printer_name or "XP-80" in printer_name):
+            # เครื่องพิมพ์ thermal ต้องใช้โหมด thermal (ESC/POS) เท่านั้น
+            # ห้ามใช้ windows (GDI) เพราะไดรเวอร์ Generic ไม่รองรับ font ภาษาไทย → ตัวอักษรเพี้ยน
+            self.printer_type_var.set("thermal")
+            if "58" in printer_name:
+                self.paper_size_var.set("58mm")
+            else:
+                self.paper_size_var.set("80mm")
             
     def load_available_printers(self):
         """โหลดรายชื่อเครื่องพิมพ์ที่มีในระบบ"""
@@ -825,14 +834,14 @@ class SettingsFrame(ctk.CTkFrame):
             messagebox.showerror("ข้อผิดพลาด", f"ไม่สามารถโหลดรายชื่อเครื่องพิมพ์ได้:\n{e}")
     
     def test_print(self):
-        """ทดสอบพิมพ์ — จำลองใบเสร็จทันทีตามประเภทและขนาดกระดาษที่เลือก"""
+        """ทดสอบพิมพ์ — จำลองใบเสร็จและสั่งพิมพ์จริงตามประเภทและขนาดกระดาษที่เลือกทันที"""
         import threading
-        import os
-        from pathlib import Path
+        from datetime import datetime
 
         printer_type = self.printer_type_var.get()
         paper_size = self.paper_size_var.get()
         printer_name = self.printer_name_var.get()
+        printer_codepage = self.printer_codepage_var.get()
 
         # ข้อมูลใบเสร็จจำลอง (สมจริง)
         test_data = {
@@ -858,31 +867,30 @@ class SettingsFrame(ctk.CTkFrame):
 
         def do_test():
             try:
-                from utils.pdf_utils import create_receipt_pdf
+                from utils.printer_utils import PrinterManager
+                pm = PrinterManager()
+                pm.printer_type = printer_type
+                pm.paper_size = paper_size
+                pm.printer_name = printer_name
+                pm.printer_codepage = printer_codepage
+                
+                # ส่งพิมพ์จริง
+                ok = pm.print_receipt(test_data)
 
-                # สร้างโฟลเดอร์ temp
-                temp_dir = Path("data/temp")
-                temp_dir.mkdir(parents=True, exist_ok=True)
-                out_path = temp_dir / f"test_receipt_{test_data['sale_number']}.pdf"
-
-                # สร้าง PDF ตามขนาดกระดาษที่เลือก
-                ok = create_receipt_pdf(test_data, str(out_path), paper_size=paper_size)
-
-                if ok and out_path.exists():
-                    # เปิดทันที — ไม่ว่าจะเลือกประเภทไหน
-                    os.startfile(str(out_path))
-                    # แจ้งผลใน main thread
+                if ok:
+                    msg = f"จำลองใบเสร็จและสั่งพิมพ์ทดสอบเรียบร้อยแล้ว!\n\n" \
+                          f"ประเภทเครื่องพิมพ์: {printer_type.upper()}\n" \
+                          f"ขนาดกระดาษ: {paper_size}\n" \
+                          f"ชื่อเครื่องพิมพ์: {printer_name or '(ค่าเริ่มต้น)'}\n"
+                    if printer_type == "thermal":
+                        msg += f"รหัสภาษาไทย (Code Page): {printer_codepage}\n"
+                    
                     self.after(100, lambda: messagebox.showinfo(
-                        "✅ ทดสอบสำเร็จ",
-                        f"จำลองใบเสร็จสำเร็จ!\n\n"
-                        f"ประเภท: {printer_type.upper()}\n"
-                        f"ขนาดกระดาษ: {paper_size}\n"
-                        f"เครื่องพิมพ์: {printer_name or '(ค่าเริ่มต้น)'}\n\n"
-                        f"ไฟล์: {out_path.name}"
+                        "✅ ทดสอบสำเร็จ", msg
                     ))
                 else:
                     self.after(100, lambda: messagebox.showerror(
-                        "ผิดพลาด", "ไม่สามารถสร้างใบเสร็จตัวอย่างได้\nตรวจสอบ log ที่ printer_debug.log"
+                        "ผิดพลาด", "ไม่สามารถพิมพ์ใบเสร็จตัวอย่างได้\nตรวจสอบ log ที่ printer_debug.log"
                     ))
             except Exception as e:
                 self.after(100, lambda err=e: messagebox.showerror(
