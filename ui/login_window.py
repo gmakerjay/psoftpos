@@ -143,20 +143,21 @@ class LoginWindow:
             placeholder_text="กรอกรหัสผ่าน",
             show="●"
         )
-        self.password_entry.pack(pady=(0, 25), padx=40, fill="x")
+        self.password_entry.pack(pady=(0, 15), padx=40, fill="x")
         
         # ปุ่มล็อกอิน
         self.login_button = ctk.CTkButton(
             login_frame,
             text="เข้าสู่ระบบ",
             font=("Sarabun", 16, "bold"),
-            height=50,
-            corner_radius=25,
+            width=220,
+            height=54,
+            corner_radius=27,
             fg_color=COLORS["primary"],
             hover_color=COLORS["secondary"],
             command=self.login
         )
-        self.login_button.pack(pady=(0, 20), padx=40, fill="x")
+        self.login_button.pack(pady=(0, 15))
         
         # ข้อมูลเริ่มต้น
         info_frame = ctk.CTkFrame(login_frame, fg_color=COLORS["light"], corner_radius=10)
