@@ -428,20 +428,21 @@ class KeyGenApp(ctk.CTk):
         # ปิด Python main.py หรือ main_trial.py
         if platform.system() == "Windows":
             try:
-                cmd = "wmic process where \"name='python.exe' or name='pythonw.exe'\" get processid,commandline"
-                output = subprocess.check_output(cmd, shell=True).decode(errors='ignore')
+                # ใช้งาน PowerShell ดึง Process ID และ CommandLine
+                cmd = ["powershell", "-NoProfile", "-Command",
+                       "Get-CimInstance Win32_Process -Filter \"Name='python.exe' or Name='pythonw.exe'\" | ForEach-Object { \"$($_.ProcessId)||$($_.CommandLine)\" }"]
+                output = subprocess.check_output(cmd, creationflags=0x08000000).decode(errors='ignore')
                 lines = output.strip().split('\n')
-                
-                for line in lines[1:]:
+                for line in lines:
                     line = line.strip()
-                    if not line:
+                    if not line or "||" not in line:
                         continue
-                    parts = line.split()
+                    parts = line.split("||", 1)
                     if len(parts) < 2:
                         continue
                     try:
-                        pid = int(parts[-1])
-                        cmdline = " ".join(parts[:-1]).lower()
+                        pid = int(parts[0].strip())
+                        cmdline = parts[1].strip().lower()
                         
                         if pid == my_pid:
                             continue
@@ -452,7 +453,32 @@ class KeyGenApp(ctk.CTk):
                     except:
                         pass
             except Exception as e:
-                self.log(f"❌ เกิดข้อผิดพลาดในการตรวจสอบ Process: {e}")
+                # ลอง Fallback กลับไปใช้ wmic ถ้ามี
+                try:
+                    cmd_wmic = "wmic process where \"name='python.exe' or name='pythonw.exe'\" get processid,commandline"
+                    output = subprocess.check_output(cmd_wmic, shell=True, timeout=5).decode(errors='ignore')
+                    lines = output.strip().split('\n')
+                    for line in lines[1:]:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        parts = line.split()
+                        if len(parts) < 2:
+                            continue
+                        try:
+                            pid = int(parts[-1])
+                            cmdline = " ".join(parts[:-1]).lower()
+                            
+                            if pid == my_pid:
+                                continue
+                                
+                            if "main.py" in cmdline or "main_trial.py" in cmdline:
+                                os.kill(pid, signal.SIGTERM)
+                                killed_count += 1
+                        except:
+                            pass
+                except Exception as ex_wmic:
+                    self.log(f"❌ เกิดข้อผิดพลาดในการตรวจสอบ Process: {ex_wmic}")
                 
         self.log(f"✅ ทำการปิดโปรแกรมที่ค้างในระบบแล้ว (รวม {killed_count} processes)")
         messagebox.showinfo("สำเร็จ", f"ปิดโปรแกรม POS ค้างในเบื้องหลังเรียบร้อยแล้ว (รวม {killed_count} รายการ)")
