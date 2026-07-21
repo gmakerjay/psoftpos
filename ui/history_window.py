@@ -536,45 +536,69 @@ class SalesHistoryFrame(ctk.CTkFrame):
     # ==========================================================
     def view_sale_detail(self, sale):
         """ดูรายละเอียดการขาย"""
-        dialog = ctk.CTkToplevel(self)
-        dialog.title(f"รายละเอียด - {sale['sale_number']}")
-        dialog.geometry("700x600")
-        dialog.transient(self)
-        dialog.grab_set()
+        sale = dict(sale) if hasattr(sale, 'keys') else sale
         
-        is_voided = sale['status'] in ('voided', 'returned')
+        try:
+            parent_win = self.winfo_toplevel()
+            dialog = ctk.CTkToplevel(parent_win)
+        except Exception:
+            dialog = ctk.CTkToplevel(self)
+
+        dialog.title(f"รายละเอียด - {sale.get('sale_number', '')}")
+        dialog.geometry("720x650")
+        
+        try:
+            dialog.transient(dialog.master)
+        except Exception:
+            pass
+            
+        dialog.lift()
+        dialog.focus_force()
+        try:
+            dialog.grab_set()
+        except Exception:
+            pass
+
+        is_voided = sale.get('status') in ('voided', 'returned')
         
         # ข้อมูลหลัก
         info_frame = ctk.CTkFrame(dialog, fg_color="white", corner_radius=10)
-        info_frame.pack(fill="x", padx=20, pady=20)
+        info_frame.pack(fill="x", padx=20, pady=(20, 10))
         
         status_text = "🚫 ยกเลิกแล้ว" if is_voided else "✅ ปกติ"
+        cashier_name = sale.get('cashier_name') or '-'
+        member_name = sale.get('member_name') or '-'
+        payment_method = sale.get('payment_method') or 'เงินสด'
+        price_type_name = PRICE_TYPES.get(sale.get('price_type', 'retail'), 'ราคาปกติ')
         
-        info_text = f"""
-        เลขที่: {sale['sale_number']}
-        วันที่/เวลา: {sale['sale_date']}
-        ประเภทราคา: {PRICE_TYPES.get(sale['price_type'], '-')}
-        พนักงานขาย: {sale.get('cashier_name', '-')}
-        สถานะ: {status_text}
-        """
+        info_text = (
+            f"เลขที่บิล: {sale.get('sale_number', '-')}\n"
+            f"วันที่/เวลา: {sale.get('sale_date', '-')}\n"
+            f"ประเภทราคา: {price_type_name}\n"
+            f"พนักงานขาย: {cashier_name}\n"
+            f"สมาชิก/ลูกค้า: {member_name}\n"
+            f"วิธีชำระเงิน: {payment_method}\n"
+            f"สถานะ: {status_text}"
+        )
         
         ctk.CTkLabel(
             info_frame,
             text=info_text,
             font=FONTS["body"],
-            justify="left"
-        ).pack(padx=20, pady=20)
+            justify="left",
+            anchor="w"
+        ).pack(padx=20, pady=15, fill="x")
         
         # รายการสินค้า
         ctk.CTkLabel(
             dialog,
-            text="รายการสินค้า",
+            text="📦 รายการสินค้าในบิล",
             font=FONTS["heading"],
             text_color=COLORS["primary"]
-        ).pack(pady=(0, 10))
+        ).pack(pady=(5, 5))
         
-        items_frame = ctk.CTkScrollableFrame(dialog, fg_color="white", corner_radius=10, height=250)
-        items_frame.pack(fill="both", expand=True, padx=20, pady=(0, 10))
+        items_frame = ctk.CTkScrollableFrame(dialog, fg_color="white", corner_radius=10, height=220)
+        items_frame.pack(fill="both", expand=True, padx=20, pady=5)
         
         self.db.connect()
         items = self.db.fetch_all(
@@ -583,56 +607,73 @@ class SalesHistoryFrame(ctk.CTkFrame):
         )
         self.db.disconnect()
         
-        for item in items:
-            item_row = ctk.CTkFrame(items_frame, fg_color=COLORS["light"], corner_radius=5)
-            item_row.pack(fill="x", padx=5, pady=5)
-            
-            ctk.CTkLabel(item_row, text=item['product_name'], font=FONTS["body"], anchor="w").pack(side="left", padx=10, pady=10)
-            ctk.CTkLabel(item_row, text=f"{item['quantity']} x ฿{item['unit_price']:,.2f}", font=FONTS["body"]).pack(side="left", padx=10)
-            ctk.CTkLabel(item_row, text=f"฿{item['total_price']:,.2f}", font=("Sarabun", 14, "bold"), text_color=COLORS["success"]).pack(side="right", padx=10)
+        if items:
+            for item in items:
+                item_dict = dict(item) if hasattr(item, 'keys') else item
+                item_row = ctk.CTkFrame(items_frame, fg_color=COLORS["light"], corner_radius=5)
+                item_row.pack(fill="x", padx=5, pady=3)
+                
+                p_name = item_dict.get('product_name', 'สินค้า')
+                q = item_dict.get('quantity', 0)
+                u_price = item_dict.get('unit_price', 0.0)
+                tot_price = item_dict.get('total_price', 0.0)
+                
+                ctk.CTkLabel(item_row, text=p_name, font=FONTS["body"], anchor="w", width=300).pack(side="left", padx=10, pady=8)
+                ctk.CTkLabel(item_row, text=f"{q} x ฿{u_price:,.2f}", font=FONTS["body"], width=150).pack(side="left", padx=10)
+                ctk.CTkLabel(item_row, text=f"฿{tot_price:,.2f}", font=("Sarabun", 14, "bold"), text_color=COLORS["success"]).pack(side="right", padx=10)
+        else:
+            ctk.CTkLabel(items_frame, text="ไม่พบรายการสินค้าในระบบ", font=FONTS["body"], text_color="gray").pack(pady=20)
         
         # สรุปยอด
         summary_frame = ctk.CTkFrame(dialog, fg_color=COLORS["light"], corner_radius=10)
-        summary_frame.pack(fill="x", padx=20, pady=(0, 20))
+        summary_frame.pack(fill="x", padx=20, pady=(5, 15))
+        
+        subtotal = sale.get('subtotal', 0.0) or 0.0
+        discount = sale.get('discount_amount', 0.0) or 0.0
+        tax = sale.get('tax_amount', 0.0) or 0.0
+        total = sale.get('total_amount', 0.0) or 0.0
+        paid = sale.get('paid_amount', 0.0) or 0.0
+        change = sale.get('change_amount', 0.0) or 0.0
         
         for label, value in [
-            ("ยอดรวม:", f"฿{sale['subtotal']:,.2f}"),
-            ("ส่วนลด:", f"฿{sale['discount_amount']:,.2f}"),
-            ("ภาษี VAT:", f"฿{sale['tax_amount']:,.2f}"),
-            ("ยอดสุทธิ:", f"฿{sale['total_amount']:,.2f}"),
-            ("รับเงิน:", f"฿{sale['paid_amount']:,.2f}"),
-            ("เงินทอน:", f"฿{sale['change_amount']:,.2f}"),
+            ("ยอดรวม:", f"฿{subtotal:,.2f}"),
+            ("ส่วนลด:", f"฿{discount:,.2f}"),
+            ("ภาษี VAT:", f"฿{tax:,.2f}"),
+            ("ยอดสุทธิ:", f"฿{total:,.2f}"),
+            ("รับเงิน:", f"฿{paid:,.2f}"),
+            ("เงินทอน:", f"฿{change:,.2f}"),
         ]:
             row = ctk.CTkFrame(summary_frame, fg_color="transparent")
-            row.pack(fill="x", padx=15, pady=5)
+            row.pack(fill="x", padx=15, pady=2)
             ctk.CTkLabel(row, text=label, font=FONTS["body"]).pack(side="left")
             ctk.CTkLabel(row, text=value, font=FONTS["body"],
                         text_color=COLORS["success"] if "ยอดสุทธิ" in label else COLORS["text_dark"]).pack(side="right")
         
-        ctk.CTkButton(dialog, text="ปิด", font=FONTS["button"], width=150, height=40, command=dialog.destroy).pack(pady=(0, 20))
+        ctk.CTkButton(dialog, text="❌ ปิดหน้าต่าง", font=FONTS["button"], width=150, height=38, command=dialog.destroy).pack(pady=(0, 15))
     
     # ==========================================================
     # พิมพ์ใบเสร็จ
     # ==========================================================
     def print_receipt(self, sale):
         """พิมพ์ใบเสร็จ"""
+        sale = dict(sale) if hasattr(sale, 'keys') else sale
         self.db.connect()
         items = self.db.fetch_all("SELECT * FROM sale_items WHERE sale_id = ?", (sale['sale_id'],))
         self.db.disconnect()
         
         receipt_data = {
             'company': COMPANY_INFO,
-            'sale_number': sale['sale_number'],
-            'sale_date': sale['sale_date'],
-            'customer_name': sale.get('customer_name') or 'ลูกค้าทั่วไป',
+            'sale_number': sale.get('sale_number', ''),
+            'sale_date': sale.get('sale_date', ''),
+            'customer_name': sale.get('member_name') or sale.get('customer_name') or 'ลูกค้าทั่วไป',
             'cashier': sale.get('cashier_name', '-'),
             'items': [dict(item) for item in items],
-            'subtotal': sale['subtotal'],
-            'discount_amount': sale['discount_amount'],
-            'tax_amount': sale['tax_amount'],
-            'total_amount': sale['total_amount'],
-            'paid_amount': sale['paid_amount'],
-            'change_amount': sale['change_amount']
+            'subtotal': sale.get('subtotal', 0.0),
+            'discount_amount': sale.get('discount_amount', 0.0),
+            'tax_amount': sale.get('tax_amount', 0.0),
+            'total_amount': sale.get('total_amount', 0.0),
+            'paid_amount': sale.get('paid_amount', 0.0),
+            'change_amount': sale.get('change_amount', 0.0)
         }
         
         try:
@@ -686,12 +727,13 @@ class SalesHistoryFrame(ctk.CTkFrame):
 
     def export_sale_to_pdf(self, sale):
         """ส่งออกใบเสร็จเป็น PDF"""
+        sale = dict(sale) if hasattr(sale, 'keys') else sale
         self.db.connect()
         items = self.db.fetch_all("SELECT * FROM sale_items WHERE sale_id = ?", (sale['sale_id'],))
         self.db.disconnect()
         
-        customer_name = 'ลูกค้าทั่วไป'
-        if sale.get('member_id'):
+        customer_name = sale.get('member_name') or 'ลูกค้าทั่วไป'
+        if sale.get('member_id') and not sale.get('member_name'):
             try:
                 self.db.connect()
                 m = self.db.fetch_one("SELECT name FROM members WHERE member_id = ?", (sale['member_id'],))
@@ -703,17 +745,17 @@ class SalesHistoryFrame(ctk.CTkFrame):
         
         receipt_data = {
             'company': COMPANY_INFO,
-            'sale_number': sale['sale_number'],
-            'sale_date': sale['sale_date'],
+            'sale_number': sale.get('sale_number', ''),
+            'sale_date': sale.get('sale_date', ''),
             'customer_name': customer_name,
             'cashier': sale.get('cashier_name', '-'),
             'items': [dict(item) for item in items],
-            'subtotal': sale['subtotal'],
-            'discount_amount': sale['discount_amount'],
-            'tax_amount': sale['tax_amount'],
-            'total_amount': sale['total_amount'],
-            'paid_amount': sale['paid_amount'],
-            'change_amount': sale['change_amount']
+            'subtotal': sale.get('subtotal', 0.0),
+            'discount_amount': sale.get('discount_amount', 0.0),
+            'tax_amount': sale.get('tax_amount', 0.0),
+            'total_amount': sale.get('total_amount', 0.0),
+            'paid_amount': sale.get('paid_amount', 0.0),
+            'change_amount': sale.get('change_amount', 0.0)
         }
         
         filename = filedialog.asksaveasfilename(

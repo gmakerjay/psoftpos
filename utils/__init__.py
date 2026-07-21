@@ -3,7 +3,7 @@ from .barcode_utils import BarcodeGenerator, create_barcode, generate_product_ba
 from .excel_utils import ExcelManager, export_sales_report, export_products_list
 from .pdf_utils import create_receipt_pdf, register_thai_font, create_barcode_labels_pdf
 from .printer_utils import print_receipt, get_printers, PrinterManager, kick_cash_drawer
-from .backup_utils import BackupManager, SalesLogManager
+from .backup_utils import BackupManager, SalesLogManager, run_auto_backup
 from .image_utils import optimize_image
 from .input_utils import bind_english_input, translate_thai_barcode
 
@@ -22,6 +22,7 @@ __all__ = [
     'PrinterManager',
     'kick_cash_drawer',
     'BackupManager',
+    'run_auto_backup',
     'bind_english_input',
     'translate_thai_barcode',
 ]

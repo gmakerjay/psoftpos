@@ -78,6 +78,15 @@ def main():
         register_process_font()
         logger.info("Starting POS System (3-Day Trial Version)...")
         
+        # === รัน Auto Backup ในพื้นหลัง ===
+        try:
+            import threading
+            from utils import run_auto_backup
+            threading.Thread(target=run_auto_backup, daemon=True).start()
+            logger.info("Background Auto Backup thread started.")
+        except Exception as e:
+            logger.error(f"Failed to start auto backup: {e}")
+        
         # ตรวจสอบ Activation ก่อน
         logger.info("🔐 Checking activation status...")
         is_activated, message, license_data = LicenseManager.check_activation()

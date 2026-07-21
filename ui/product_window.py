@@ -13,7 +13,7 @@ from utils import (
 from config import *
 from database import DatabaseManager
 import os
-import pandas as pd
+
 from pathlib import Path
 from datetime import datetime
 

@@ -23,19 +23,18 @@ class HardwareID:
         """ดึง UUID ของ Motherboard"""
         try:
             if platform.system() == "Windows":
+                import winreg
                 try:
-                    cmd = "powershell -Command \"Get-CimInstance Win32_ComputerSystemProduct | Select-Object -ExpandProperty UUID\""
-                    result = subprocess.check_output(cmd, shell=True).decode().strip()
-                    if result and result.lower() != "to be filled by o.e.m.":
-                        return result
+                    key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\BIOS")
+                    vendor, _ = winreg.QueryValueEx(key, "SystemManufacturer")
+                    prod, _ = winreg.QueryValueEx(key, "SystemProductName")
+                    board, _ = winreg.QueryValueEx(key, "BaseBoardProduct")
+                    winreg.CloseKey(key)
+                    mb_str = f"{vendor}-{prod}-{board}".strip()
+                    if mb_str and mb_str.lower() != "to be filled by o.e.m.":
+                        return mb_str
                 except:
                     pass
-                
-                cmd = "wmic csproduct get uuid"
-                result = subprocess.check_output(cmd, shell=True).decode()
-                uuid_line = result.split('\n')[1].strip()
-                if uuid_line and uuid_line.lower() != "to be filled by o.e.m.":
-                    return uuid_line
             return "UNKNOWN_MB_UUID"
         except:
             return "UNKNOWN_MB_UUID"
@@ -45,22 +44,24 @@ class HardwareID:
         """ดึง CPU ID"""
         try:
             if platform.system() == "Windows":
+                import winreg
                 try:
-                    cmd = "powershell -Command \"Get-CimInstance Win32_Processor | Select-Object -ExpandProperty ProcessorId\""
-                    result = subprocess.check_output(cmd, shell=True).decode().strip()
-                    if result:
-                        return result
+                    key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0")
+                    proc_name, _ = winreg.QueryValueEx(key, "ProcessorNameString")
+                    proc_id, _ = winreg.QueryValueEx(key, "Identifier")
+                    winreg.CloseKey(key)
+                    cpu_str = f"{proc_name}-{proc_id}".strip()
+                    if cpu_str:
+                        return cpu_str
                 except:
                     pass
-                
-                cmd = "wmic cpu get processorid"
-                result = subprocess.check_output(cmd, shell=True).decode()
-                cpu_id = result.split('\n')[1].strip()
-                if cpu_id:
-                    return cpu_id
+                proc_env = os.environ.get('PROCESSOR_IDENTIFIER')
+                if proc_env:
+                    return proc_env
             return "UNKNOWN_CPU"
         except:
             return "UNKNOWN_CPU"
+
 
     @staticmethod
     def get_disk_serial():
@@ -107,6 +108,9 @@ class HardwareID:
     @staticmethod
     def generate_hwid():
         """สร้าง HWID แบบ Tolerant (4 กลุ่มจาก 4 ฮาร์ดแวร์หลัก)"""
+        if HardwareID._cached_hwid is not None:
+            return HardwareID._cached_hwid
+
         mb = HardwareID.get_motherboard_uuid()
         cpu = HardwareID.get_cpu_id()
         disk = HardwareID.get_disk_serial()
@@ -120,7 +124,8 @@ class HardwareID:
         disk_h = hashlib.sha256(disk.encode()).hexdigest()[:8].upper() if disk != "UNKNOWN_DISK" else fallback
         guid_h = hashlib.sha256(guid.encode()).hexdigest()[:8].upper() if guid != "UNKNOWN_GUID" else fallback
         
-        return f"{mb_h}-{cpu_h}-{disk_h}-{guid_h}"
+        HardwareID._cached_hwid = f"{mb_h}-{cpu_h}-{disk_h}-{guid_h}"
+        return HardwareID._cached_hwid
 
     @staticmethod
     def get_machine_id():
@@ -629,21 +634,31 @@ class LicenseManager:
         """
         ตรวจสอบว่าโปรแกรมถูก Activate แล้วหรือไม่
         """
-        # 1. ตรวจสอบการย้อนเวลาก่อน
+        # 1. ตรวจสอบความถูกต้องของเวลาเครื่อง
         clock_ok, clock_msg = LicenseManager.verify_system_clock()
         if not clock_ok:
             return False, clock_msg, None
             
-        # 2. โหลด License
+        # 2. โหลด License Key จากเครื่อง
         license_key = LicenseManager.load_license()
         if not license_key:
-            return False, "ไม่พบ License Key - กรุณา Activate โปรแกรม", None
+            return False, "ไม่พบ License Key กรุณาลงทะเบียนใช้งานโปรแกรม", None
+            
+        # 3. ตรวจสอบความถูกต้องของ License Key เทียบกับ HWID ปัจจุบัน
+        current_hwid = HardwareID.generate_hwid()
+        is_valid, msg, license_data = LicenseManager.validate_license_key(license_key, current_hwid)
         
-        # 3. ดึง HWID ปัจจุบัน
-        hwid = HardwareID.generate_hwid()
-        
-        # 4. ตรวจสอบ License
-        return LicenseManager.validate_license_key(license_key, hwid)
+        if not is_valid:
+            return False, msg, None
+            
+        # เติมตัวแปร days_left ลงใน license_data เพื่อให้สอดคล้องกับการแจ้งเตือน
+        try:
+            expire_date = datetime.strptime(license_data['expire_date'], "%Y-%m-%d")
+            license_data['days_left'] = (expire_date.date() - datetime.now().date()).days
+        except:
+            license_data['days_left'] = 0
+            
+        return True, msg, license_data
 
 # ทดสอบ
 if __name__ == "__main__":

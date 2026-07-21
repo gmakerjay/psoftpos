@@ -456,10 +456,19 @@ class ReportsFrame(ctk.CTkFrame):
                     
                     text_color = "#999" if row['is_voided'] else COLORS["text_dark"]
                     
+                    # แปลวิธีชำระเงินเป็นภาษาไทย
+                    pm_map = {
+                        'cash': 'เงินสด',
+                        'transfer': 'โอนเงิน',
+                        'qr': 'QR Code',
+                        'mixed': 'จ่ายผสม',
+                    }
+                    pm_display = pm_map.get(str(row['payment_method']).lower(), row['payment_method'])
+                    
                     ctk.CTkLabel(r, text=row['sale_number'], width=150, font=FONTS["body"], text_color=text_color).pack(side="left", padx=5, pady=6)
                     ctk.CTkLabel(r, text=row['date_str'], width=180, font=FONTS["body"], text_color=text_color).pack(side="left", padx=5)
                     ctk.CTkLabel(r, text=f"฿{row['total_amount']:,.2f}", width=120, font=("Sarabun", 14, "bold"), text_color=text_color).pack(side="left", padx=5)
-                    ctk.CTkLabel(r, text=row['payment_method'], width=100, font=FONTS["body"], text_color=text_color).pack(side="left", padx=5)
+                    ctk.CTkLabel(r, text=pm_display, width=100, font=FONTS["body"], text_color=text_color).pack(side="left", padx=5)
                     ctk.CTkLabel(r, text=row['status_text'], width=100, text_color=row['status_color'], font=FONTS["body"]).pack(side="left", padx=5)
                     ctk.CTkLabel(r, text=row['source'], width=180, font=FONTS["small"], text_color="#888").pack(side="left", padx=5)
                 except Exception as e:
@@ -605,10 +614,19 @@ class ReportsFrame(ctk.CTkFrame):
             r = ctk.CTkFrame(self.backup_table, fg_color=bg)
             r.pack(fill="x", pady=1)
             
+            # แปลวิธีชำระเงินเป็นภาษาไทย
+            pm_map = {
+                'cash': 'เงินสด',
+                'transfer': 'โอนเงิน',
+                'qr': 'QR Code',
+                'mixed': 'จ่ายผสม',
+            }
+            pm_display = pm_map.get(str(sale['payment_method']).lower(), sale['payment_method'])
+            
             ctk.CTkLabel(r, text=sale['sale_number'], width=160, font=("Courier New", 13), text_color="#e2e8f0").pack(side="left", padx=5, pady=5)
             ctk.CTkLabel(r, text=sale['time'], width=100, font=("Courier New", 13), text_color="#94a3b8").pack(side="left", padx=5)
             ctk.CTkLabel(r, text=f"฿{sale['total_amount']:,.2f}", width=120, font=("Courier New", 13, "bold"), text_color="#4ade80").pack(side="left", padx=5)
-            ctk.CTkLabel(r, text=sale['payment_method'], width=100, font=("Courier New", 13), text_color="#94a3b8").pack(side="left", padx=5)
+            ctk.CTkLabel(r, text=pm_display, width=100, font=("Courier New", 13), text_color="#94a3b8").pack(side="left", padx=5)
             ctk.CTkLabel(r, text=sale.get('date_range', ''), width=200, font=("Courier New", 11), text_color="#64748b").pack(side="left", padx=5)
             ctk.CTkLabel(r, text=sale['source_file'], width=250, font=("Courier New", 10), text_color="#475569").pack(side="left", padx=5)
 

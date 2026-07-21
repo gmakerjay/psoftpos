@@ -196,6 +196,10 @@ class DatabaseManager:
                             self.connection = conn_info['connection']
                             self.connection.row_factory = sqlite3.Row
                             self.cursor = self.connection.cursor()
+                            try:
+                                self.cursor.execute("PRAGMA foreign_keys = ON")
+                            except:
+                                pass
                             self._check_and_auto_init()
                             return True
                     
@@ -210,6 +214,7 @@ class DatabaseManager:
                         cursor.execute("PRAGMA cache_size=-8000")       # 8MB cache (default 2MB)
                         cursor.execute("PRAGMA temp_store=MEMORY")      # ใช้ RAM สำหรับ temp tables
                         cursor.execute("PRAGMA mmap_size=67108864")     # 64MB memory-mapped I/O
+                        cursor.execute("PRAGMA foreign_keys = ON")      # บังคับใช้ Foreign Keys
                         conn_id = id(conn)
                         self._connection_pool[conn_id] = {
                             'connection': conn,
@@ -223,6 +228,16 @@ class DatabaseManager:
             # Fallback: สร้าง connection ปกติ
             self.connection = sqlite3.connect(self.db_path)
             self.connection.row_factory = sqlite3.Row
+            # === Performance PRAGMAs + Foreign Keys on Fallback ===
+            try:
+                cursor = self.connection.cursor()
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA synchronous=NORMAL")
+                cursor.execute("PRAGMA cache_size=-8000")
+                cursor.execute("PRAGMA temp_store=MEMORY")
+                cursor.execute("PRAGMA foreign_keys = ON")
+            except:
+                pass
             self.cursor = self.connection.cursor()
             self._check_and_auto_init()
             return True
@@ -593,25 +608,24 @@ class DatabaseManager:
         
     def _create_default_admin(self):
         """สร้างผู้ใช้เริ่มต้น (admin + cashier)"""
-        # สร้าง admin ถ้ายังไม่มี
+        # สร้าง admin ถ้ายังไม่มี (ใช้ pre-computed hash สำหรับ 'psoft123')
         result = self.fetch_one("SELECT user_id FROM users WHERE username = ?", ("admin",))
         if not result:
-            password = "psoft123"
-            password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            password_hash = "$2b$04$NpEkjwARdGKii3UTWHskI.Svk4KShuFFtcJ8u.KMnsOvLcsf2Ty6C"
             self.execute("""
                 INSERT INTO users (username, password_hash, full_name, role, is_active)
                 VALUES (?, ?, ?, ?, ?)
             """, ("admin", password_hash, "ผู้ดูแลระบบ", "admin", 1))
         
-        # สร้าง user (พนักงานขาย) ถ้ายังไม่มี
+        # สร้าง user (พนักงานขาย) ถ้ายังไม่มี (ใช้ pre-computed hash สำหรับ 'user123')
         result = self.fetch_one("SELECT user_id FROM users WHERE username = ?", ("user",))
         if not result:
-            password = "user123"
-            password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            password_hash = "$2b$04$rOaZTVrl0ncYddnP0vCtU.wrWOPSAsPbtrlDLKJct9oSyGkQ98Y0i"
             self.execute("""
                 INSERT INTO users (username, password_hash, full_name, role, is_active)
                 VALUES (?, ?, ?, ?, ?)
             """, ("user", password_hash, "พนักงานขาย", "cashier", 1))
+
         
     def _create_default_categories(self):
         """สร้างหมวดหมู่เริ่มต้น"""
@@ -698,3 +712,27 @@ class DatabaseManager:
             new_number = 1
             
         return f"{prefix}{new_number:04d}"
+
+    def check_integrity(self):
+        """ตรวจสอบความสมบูรณ์ของฐานข้อมูล (Database Integrity Check)"""
+        try:
+            self.connect()
+            result = self.fetch_one("PRAGMA integrity_check")
+            self.disconnect()
+            if result and result[0] == "ok":
+                return True, "ok"
+            return False, str(result[0] if result else "Unknown error")
+        except Exception as e:
+            return False, str(e)
+            
+    def check_foreign_keys(self):
+        """ตรวจสอบความถูกต้องของ Foreign Keys (Foreign Key Check)"""
+        try:
+            self.connect()
+            result = self.fetch_all("PRAGMA foreign_key_check")
+            self.disconnect()
+            if not result:
+                return True, "No foreign key violations"
+            return False, f"พบจุดผิดพลาด Foreign Key ทั้งหมด {len(result)} รายการ"
+        except Exception as e:
+            return False, str(e)

@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-Logger System - ระบบบันทึก Log สำหรับ Debug
+Logger System - ระบบบันทึก Log สำหรับ Debug และวิเคราะห์ปัญหาของลูกค้า
 """
 
 import os
 import logging
 import sys
+import platform
+import threading
+import zipfile
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 
@@ -59,7 +62,7 @@ class POSLogger:
         )
         file_handler.setLevel(logging.DEBUG)
         
-        # Format สำหรับไฟล์ (ละเอียด)
+        # Format สำหรับไฟล์ (รายละเอียดลึก: เวลา, ระดับ, ไฟล์:เลขบรรทัด, ข้อความ)
         file_formatter = logging.Formatter(
             '[%(asctime)s] [%(levelname)s] [%(filename)s:%(lineno)d] - %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
@@ -70,7 +73,7 @@ class POSLogger:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.DEBUG)  # บันทึกทุกอย่างลง Console เพื่อการ Debug
         
-        # Format สำหรับ Console (สั้นลงและอ่านง่าย)
+        # Format สำหรับ Console
         console_formatter = logging.Formatter(
             '[%(levelname)s] %(message)s'
         )
@@ -80,11 +83,15 @@ class POSLogger:
         self.logger.addHandler(file_handler)
         self.logger.addHandler(console_handler)
         
-        # บันทึกว่าเปิด Logger
+        # บันทึกข้อมูลสภาพแวดล้อมระบบ (Environment Info) เพื่อความสะดวกในการวิเคราะห์ปัญหาของลูกค้า
         self.logger.info("="*70)
         self.logger.info("POS System Started")
-        self.logger.info(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        self.logger.info(f"Log File: {log_file}")
+        self.logger.info(f"Date/Time  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        self.logger.info(f"Log File   : {log_file}")
+        self.logger.info(f"OS Platform: {platform.platform()} ({platform.architecture()[0]})")
+        self.logger.info(f"Python Ver : {sys.version.split()[0]}")
+        self.logger.info(f"Exec Path  : {sys.executable}")
+        self.logger.info(f"Work Dir   : {os.getcwd()}")
         self.logger.info("="*70)
     
     def get_logger(self):
@@ -96,7 +103,7 @@ class POSLogger:
         today = datetime.now().strftime("%Y-%m-%d")
         log_file = f"Logs/{today}.log"
         
-        # ถ้าวันเปลี่ยน สร้างไฟล์ใหม่ (ใช้ abspath เพื่อเทียบกับ baseFilename — BUG-020)
+        # ถ้าวันเปลี่ยน สร้างไฟล์ใหม่ (ใช้ abspath เพื่อเทียบกับ baseFilename)
         if os.path.abspath(log_file) != self.logger.handlers[0].baseFilename:
             self.setup_logger()
         
@@ -109,13 +116,13 @@ class POSLogger:
     
     @staticmethod
     def log_exception(exc_type, exc_value, exc_traceback):
-        """จับ Exception ทั้งโปรแกรม"""
+        """จับ Exception ทั้งโปรแกรม (ทั้ง Main Thread, GUI Callbacks, และ Background Threads)"""
         if issubclass(exc_type, KeyboardInterrupt):
             sys.__excepthook__(exc_type, exc_value, exc_traceback)
             return
         
         logger = POSLogger().get_logger()
-        logger.critical("UNHANDLED EXCEPTION:", exc_info=(exc_type, exc_value, exc_traceback))
+        logger.critical("UNHANDLED EXCEPTION ENCOUNTERED:", exc_info=(exc_type, exc_value, exc_traceback))
 
 
 # ===== Global Functions =====
@@ -195,18 +202,75 @@ def new_log_session(session_type="OPEN"):
     pos_logger.new_session(session_type)
 
 
-# ===== Initialize Logger =====
-# สร้าง Logger ทันทีเมื่อ import module
+def export_logs_zip(output_path=None):
+    """ส่งออกไฟล์ Log ทั้งหมดใส่ไฟล์ ZIP เพื่อส่งให้ทีมงานซัพพอร์ตวิเคราะห์ปัญหาได้ง่าย"""
+    try:
+        os.makedirs("Logs", exist_ok=True)
+        if not output_path:
+            today = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+            output_path = os.path.abspath(f"Logs/SystemLogs_{today}.zip")
+            
+        with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, _, files in os.walk("Logs"):
+                for file in files:
+                    if file.endswith(".log"):
+                        file_path = os.path.join(root, file)
+                        arcname = os.path.relpath(file_path, "Logs")
+                        zipf.write(file_path, arcname)
+        return True, output_path
+    except Exception as e:
+        log_error(f"Failed to export logs zip: {e}", exc_info=True)
+        return False, str(e)
+
+
+# ===== Initialize Logger & Global Hooks =====
 _pos_logger = POSLogger()
 
-# ตั้งค่าให้จับ Exception ทั้งโปรแกรม
+# 1. ดักจับ Exception จาก Python Main Script
 sys.excepthook = POSLogger.log_exception
+
+# 2. ดักจับ Exception จาก Background Threads
+def _thread_excepthook(args):
+    POSLogger.log_exception(args.exc_type, args.exc_value, args.exc_tb)
+
+if hasattr(threading, 'excepthook'):
+    threading.excepthook = _thread_excepthook
+
+# 3. ดักจับ Exception จาก Tkinter GUI Callbacks (ปุ่มกด, Event, Trace)
+try:
+    import tkinter as tk
+    def _tk_excepthook(self, exc_type, exc_value, exc_traceback):
+        POSLogger.log_exception(exc_type, exc_value, exc_traceback)
+    tk.Tk.report_callback_exception = _tk_excepthook
+except Exception as _ex_tk:
+    pass
 
 
 if __name__ == "__main__":
-    # ทดสอบ Logger
     logger = get_logger(__name__)
     
+    logger.debug("This is DEBUG message")
+    logger.info("This is INFO message")
+    logger.warning("This is WARNING message")
+    logger.error("This is ERROR message")
+    logger.critical("This is CRITICAL message")
+    
+    log_user_action(1, "LOGIN", "admin user")
+    log_sale(123, 1500.00, 5)
+    log_error("Test error message")
+    log_warning("Test warning message")
+    log_info("Test info message")
+    
+    try:
+        result = 10 / 0
+    except Exception as e:
+        logger.error("Division by zero", exc_info=True)
+    
+    new_log_session("TEST_SESSION")
+    
+    ok, zpath = export_logs_zip()
+    print(f"\n✅ Logger tested & exported to: {zpath}")
+
     logger.debug("This is DEBUG message")
     logger.info("This is INFO message")
     logger.warning("This is WARNING message")

@@ -3,7 +3,7 @@
 ฟังก์ชันสำหรับจัดการ Excel (Import/Export)
 """
 
-import pandas as pd
+
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from datetime import datetime
@@ -123,6 +123,7 @@ class ExcelManager:
             list of dict
         """
         try:
+            import pandas as pd
             df = pd.read_excel(filename, sheet_name=sheet_name, header=header_row)
             return df.to_dict('records')
         except Exception as e:

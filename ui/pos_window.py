@@ -225,10 +225,11 @@ class POSFrame(ctk.CTkFrame):
                     if self.selected_member_id:
                         try:
                             self.db.connect()
-                            m = self.db.fetch_one("SELECT privilege FROM members WHERE member_id = ?", (self.selected_member_id,))
+                            m = self.db.fetch_one("SELECT privilege, points FROM members WHERE member_id = ?", (self.selected_member_id,))
                             self.db.disconnect()
                             priv = m['privilege'] if m else None
-                            self.member_privilege_label.configure(text=f"🎁 สิทธิ์: {priv or 'ไม่มีสิทธิพิเศษ'}")
+                            pts = m['points'] if m else 0
+                            self.member_privilege_label.configure(text=f"🎁 สิทธิ์: {priv or 'ไม่มีสิทธิพิเศษ'} | 🪙 แต้มสะสม: {pts} แต้ม")
                         except:
                             self.member_privilege_label.configure(text="")
                     else:
@@ -373,14 +374,35 @@ class POSFrame(ctk.CTkFrame):
             member_frame,
             text="สมาชิก:",
             font=FONTS["body"]
-        ).pack(side="left", padx=(0, 10))
+        ).pack(side="left", padx=(0, 5))
+        
+        self.member_search_entry = ctk.CTkEntry(
+            member_frame,
+            placeholder_text="ค้นชื่อ/เบอร์...",
+            font=FONTS["body"],
+            width=100,
+            height=35
+        )
+        self.member_search_entry.pack(side="left", padx=2)
+        self.member_search_entry.bind("<Return>", self.search_member_pos)
+        
+        self.member_search_btn = ctk.CTkButton(
+            member_frame,
+            text="🔍",
+            font=FONTS["body"],
+            width=35,
+            height=35,
+            fg_color=COLORS["primary"],
+            command=self.search_member_pos
+        )
+        self.member_search_btn.pack(side="left", padx=2)
         
         self.member_var = ctk.StringVar(value="-- เลือกสมาชิก --")
         self.member_combo = ctk.CTkComboBox(
             member_frame,
             values=["-- เลือกสมาชิก --"],
             variable=self.member_var,
-            width=230,
+            width=160,
             height=35,
             font=FONTS["body"],
             state="readonly",
@@ -630,6 +652,42 @@ class POSFrame(ctk.CTkFrame):
         except Exception as e:
             print(f"Error loading members in POS: {e}")
             
+    def search_member_pos(self, event=None):
+        """ค้นหาสมาชิกด้วยชื่อหรือเบอร์โทรในหน้า POS"""
+        query = self.member_search_entry.get().strip()
+        if not query:
+            self.load_members_dropdown()
+            return
+            
+        try:
+            self.db.connect()
+            members = self.db.fetch_all(
+                "SELECT member_id, name, phone FROM members WHERE name LIKE ? OR phone LIKE ? ORDER BY name",
+                (f"%{query}%", f"%{query}%")
+            )
+            self.db.disconnect()
+            
+            if not members:
+                messagebox.showinfo("ไม่พบสมาชิก", f"ไม่พบสมาชิกที่ตรงกับ: {query}")
+                self.load_members_dropdown()
+                return
+                
+            self._members_cache_pos = {f"{m['name']} ({m['phone'] or '-'})": m['member_id'] for m in members}
+            values = ["-- เลือกสมาชิก --"] + list(self._members_cache_pos.keys())
+            self.member_combo.configure(values=values)
+            
+            if len(members) == 1:
+                selected_val = list(self._members_cache_pos.keys())[0]
+                self.member_combo.set(selected_val)
+                self.on_member_selected(selected_val)
+            else:
+                self.member_combo.set("-- เลือกสมาชิก --")
+                self.selected_member_id = None
+                if hasattr(self, 'member_privilege_label'):
+                    self.member_privilege_label.configure(text="")
+        except Exception as e:
+            print(f"Error searching members in POS: {e}")
+            
     def on_member_selected(self, val):
         """เมื่อเลือกสมาชิก คำนวณส่วนลดสมาชิกอัตโนมัติ"""
         if val == "-- เลือกสมาชิก --":
@@ -664,8 +722,9 @@ class POSFrame(ctk.CTkFrame):
                 
             # แสดงรายละเอียดสิทธิประโยชน์
             privilege = m['privilege'] or "ไม่มีสิทธิพิเศษ"
+            points = m['points'] or 0
             if hasattr(self, 'member_privilege_label'):
-                self.member_privilege_label.configure(text=f"🎁 สิทธิ์: {privilege}")
+                self.member_privilege_label.configure(text=f"🎁 สิทธิ์: {privilege} | 🪙 แต้มสะสม: {points} แต้ม")
                 
             # คำนวณส่วนลด
             disc_type = m['discount_type']
@@ -1119,7 +1178,7 @@ class POSFrame(ctk.CTkFrame):
         
         # ปรับขนาดให้เหมาะสมหากมีสมาชิกเพื่อรองรับช่องใส่แต้ม
         if self.selected_member_id:
-            dialog.geometry("520x620")
+            dialog.geometry("520x680")
         else:
             dialog.geometry("520x550")
             
@@ -1127,15 +1186,18 @@ class POSFrame(ctk.CTkFrame):
         dialog.grab_set()
         
         # ยอดที่ต้องชำระ
-        ctk.CTkLabel(
+        payable_label = ctk.CTkLabel(
             dialog,
             text=f"ยอดที่ต้องชำระ: ฿{total:,.2f}",
             font=("Sarabun", 24, "bold"),
             text_color=COLORS["success"]
-        ).pack(pady=20)
+        )
+        payable_label.pack(pady=20)
 
         # ข้อมูลสมาชิกและแต้มสะสม
         points_used_var = ctk.StringVar(value="0")
+        point_discount_var = ctk.StringVar(value="0")
+        points_earned_var = ctk.StringVar(value=str(int(total // POINT_EARN_RATE)))
         member_points = 0
         if self.selected_member_id:
             try:
@@ -1157,25 +1219,66 @@ class POSFrame(ctk.CTkFrame):
                         text_color=COLORS["text_dark"]
                     ).pack(pady=(5, 2))
                     
+                    # แถวสำหรับกรอกแต้มที่ใช้ และ ส่วนลดที่ได้
                     pts_use_row = ctk.CTkFrame(member_pts_frame, fg_color="transparent")
-                    pts_use_row.pack(fill="x", pady=(0, 5))
+                    pts_use_row.pack(fill="x", pady=(2, 2))
                     
-                    ctk.CTkLabel(pts_use_row, text="ใช้แต้มในบิลนี้:", font=FONTS["small"]).pack(side="left", padx=(10, 5))
-                    pts_use_entry = ctk.CTkEntry(pts_use_row, textvariable=points_used_var, width=100, height=25, font=FONTS["small"], justify="center")
+                    ctk.CTkLabel(pts_use_row, text="ใช้แต้มสะสม:", font=FONTS["small"]).pack(side="left", padx=(10, 5))
+                    pts_use_entry = ctk.CTkEntry(pts_use_row, textvariable=points_used_var, width=80, height=25, font=FONTS["small"], justify="center")
                     pts_use_entry.pack(side="left")
                     
-                    # ตรวจสอบแต้มไม่ให้เกินแต้มที่มี
+                    ctk.CTkLabel(pts_use_row, text="แต้ม  คิดเป็นส่วนลด:", font=FONTS["small"]).pack(side="left", padx=(10, 5))
+                    pts_disc_entry = ctk.CTkEntry(pts_use_row, textvariable=point_discount_var, width=80, height=25, font=FONTS["small"], justify="center")
+                    pts_disc_entry.pack(side="left")
+                    ctk.CTkLabel(pts_use_row, text="บาท", font=FONTS["small"]).pack(side="left", padx=2)
+                    
+                    # แถวสำหรับกรอกแต้มที่จะได้รับในบิลนี้
+                    pts_earn_row = ctk.CTkFrame(member_pts_frame, fg_color="transparent")
+                    pts_earn_row.pack(fill="x", pady=(2, 5))
+                    
+                    ctk.CTkLabel(pts_earn_row, text="แต้มที่ได้รับจากบิลนี้:", font=FONTS["small"]).pack(side="left", padx=(10, 5))
+                    pts_earn_entry = ctk.CTkEntry(pts_earn_row, textvariable=points_earned_var, width=80, height=25, font=FONTS["small"], justify="center")
+                    pts_earn_entry.pack(side="left")
+                    ctk.CTkLabel(pts_earn_row, text="แต้ม", font=FONTS["small"]).pack(side="left", padx=2)
+                    
+                    # ตรวจสอบแต้มไม่ให้เกินแต้มที่มี และคำนวณส่วนลดโดยอัตโนมัติ (และป้องกัน loop)
                     def validate_points_use(*args):
                         try:
                             val = int(points_used_var.get() or 0)
                             if val < 0:
                                 points_used_var.set("0")
+                                val = 0
                             elif val > member_points:
                                 points_used_var.set(str(member_points))
+                                val = member_points
+                                
+                            discount_from_points = val * POINT_REDEEM_VALUE
+                            if discount_from_points > total:
+                                discount_from_points = total
+                                val = int(total // POINT_REDEEM_VALUE)
+                                points_used_var.set(str(val))
+                                
+                            try:
+                                curr_disc = float(point_discount_var.get() or 0)
+                            except:
+                                curr_disc = 0.0
+                                
+                            if abs(curr_disc - discount_from_points) > 0.01:
+                                point_discount_var.set(str(int(discount_from_points) if discount_from_points == int(discount_from_points) else discount_from_points))
                         except ValueError:
                             points_used_var.set("0")
+                            point_discount_var.set("0")
+                            
+                    def validate_points_earned(*args):
+                        try:
+                            val = int(points_earned_var.get() or 0)
+                            if val < 0:
+                                points_earned_var.set("0")
+                        except ValueError:
+                            points_earned_var.set("0")
                             
                     points_used_var.trace_add("write", validate_points_use)
+                    points_earned_var.trace_add("write", validate_points_earned)
             except Exception as e:
                 print(f"Error loading member points in checkout: {e}")
         
@@ -1263,8 +1366,63 @@ class POSFrame(ctk.CTkFrame):
         )
         change_label.pack(pady=15)
         
+        def on_point_discount_change(*args):
+            try:
+                pt_disc = float(point_discount_var.get() or 0)
+            except ValueError:
+                pt_disc = 0.0
+            
+            if pt_disc < 0:
+                point_discount_var.set("0")
+                pt_disc = 0.0
+            elif pt_disc > total:
+                pt_disc = total
+                point_discount_var.set(str(int(total) if total == int(total) else total))
+            
+            # คำนวณแต้มที่ต้องแลกและอัปเดตแบบป้องกัน loop
+            pts_needed = int(pt_disc // POINT_REDEEM_VALUE)
+            if pts_needed > member_points:
+                pts_needed = member_points
+                pt_disc = pts_needed * POINT_REDEEM_VALUE
+                point_discount_var.set(str(int(pt_disc) if pt_disc == int(pt_disc) else pt_disc))
+                
+            try:
+                curr_pts = int(points_used_var.get() or 0)
+            except:
+                curr_pts = 0
+                
+            if curr_pts != pts_needed:
+                points_used_var.set(str(pts_needed))
+                
+            current_total = max(0.0, total - pt_disc)
+            payable_label.configure(text=f"ยอดที่ต้องชำระ: ฿{current_total:,.2f}")
+            
+            # อัปเดตแต้มที่จะได้รับโดยอัตโนมัติตามอัตราสะสมแต้ม
+            points_earned_var.set(str(int(current_total // POINT_EARN_RATE)))
+            
+            # อัปเดตช่องรับเงิน
+            method = payment_method_combo.get()
+            if method != "จ่ายผสม (Mixed)":
+                paid_entry.delete(0, 'end')
+                paid_entry.insert(0, f"{current_total:.2f}")
+            else:
+                try:
+                    c_val = float(cash_paid_entry.get() or 0)
+                except:
+                    c_val = 0.0
+                transfer_paid_entry.delete(0, 'end')
+                transfer_paid_entry.insert(0, f"{max(0.0, current_total - c_val):.2f}")
+                
+            calculate_change()
+
         def calculate_change(*args):
             try:
+                try:
+                    pt_disc = float(point_discount_var.get() or 0)
+                except:
+                    pt_disc = 0.0
+                current_total = max(0.0, total - pt_disc)
+                
                 method = payment_method_combo.get()
                 if method == "จ่ายผสม (Mixed)":
                     c_str = cash_paid_entry.get().strip()
@@ -1276,7 +1434,7 @@ class POSFrame(ctk.CTkFrame):
                     p_str = paid_entry.get().strip()
                     paid = float(p_str) if p_str else 0.0
                     
-                change = paid - total
+                change = paid - current_total
                 if change < 0:
                     change_label.configure(
                         text=f"ยังขาดอีก: ฿{abs(change):,.2f}",
@@ -1295,8 +1453,12 @@ class POSFrame(ctk.CTkFrame):
                 
                 # อัพเดทที่จอลูกค้า
                 self.update_customer_display(paid=paid, change=change)
-            except:
+            except Exception as e:
+                print(f"Error calculating change: {e}")
                 change_label.configure(text="เงินทอน: ฿0.00")
+        
+        # ผูกฟังก์ชัน trace กับจุดเปลี่ยนแปลงส่วนลดแต้ม
+        point_discount_var.trace_add("write", on_point_discount_change)
         
         paid_entry.bind("<KeyRelease>", calculate_change)
         cash_paid_entry.bind("<KeyRelease>", calculate_change)
@@ -1325,6 +1487,12 @@ class POSFrame(ctk.CTkFrame):
             method_db = "cash"
             details_db = None
             
+            try:
+                pt_disc = float(point_discount_var.get() or 0)
+            except:
+                pt_disc = 0.0
+            current_total = max(0.0, total - pt_disc)
+            
             if method == "โอนเงิน":
                 method_db = "transfer"
             elif method == "QR Code":
@@ -1347,15 +1515,21 @@ class POSFrame(ctk.CTkFrame):
                     return
                     
             points_used = 0
+            points_earned = 0
             if self.selected_member_id:
                 try:
                     points_used = int(points_used_var.get() or 0)
                 except ValueError:
                     points_used = 0
+                try:
+                    points_earned = int(points_earned_var.get() or 0)
+                except ValueError:
+                    points_earned = 0
                     
             self.process_payment(
-                dialog, total, subtotal, discount_amount, 
-                tax_amount, str(paid_val), method_db, details_db, points_used=points_used
+                dialog, current_total, subtotal, discount_amount + pt_disc, 
+                tax_amount, str(paid_val), method_db, details_db, 
+                points_used=points_used, points_earned=points_earned
             )
 
         confirm_btn = ctk.CTkButton(
@@ -1375,7 +1549,7 @@ class POSFrame(ctk.CTkFrame):
         transfer_paid_entry.bind("<Return>", do_payment)
         dialog.bind("<Return>", do_payment)
     
-    def process_payment(self, dialog, total, subtotal, discount_amount, tax_amount, paid_str, payment_method="cash", payment_details=None, points_used=0):
+    def process_payment(self, dialog, total, subtotal, discount_amount, tax_amount, paid_str, payment_method="cash", payment_details=None, points_used=0, points_earned=0):
         """ประมวลผลการชำระเงิน"""
         try:
             paid = float(paid_str)
@@ -1388,11 +1562,6 @@ class POSFrame(ctk.CTkFrame):
             return
         
         change = paid - total
-        
-        # คำนวณแต้มสะสม
-        points_earned = 0
-        if self.selected_member_id:
-            points_earned = int(total // 100)
             
         # บันทึกการขาย (ใช้ Transaction เพื่อความปลอดภัยของข้อมูล)
         self.db.connect()

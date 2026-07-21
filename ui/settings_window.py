@@ -209,6 +209,72 @@ class SettingsFrame(ctk.CTkFrame):
             text_color=COLORS["text_light"]
         ).pack(padx=20, pady=(0, 15))
         
+        # ระบบสะสมแต้ม
+        points_frame = ctk.CTkFrame(content, fg_color=COLORS["light"], corner_radius=10)
+        points_frame.pack(fill="x", padx=20, pady=(0, 20))
+        
+        ctk.CTkLabel(
+            points_frame,
+            text="👥 ตั้งค่าการสะสมแต้มสมาชิก",
+            font=FONTS["heading"],
+            text_color=COLORS["primary"]
+        ).pack(padx=20, pady=(20, 10))
+        
+        points_row = ctk.CTkFrame(points_frame, fg_color="transparent")
+        points_row.pack(fill="x", padx=20, pady=(0, 10))
+        
+        ctk.CTkLabel(
+            points_row,
+            text="ยอดซื้อขั้นต่ำเพื่อรับ 1 แต้ม:",
+            font=FONTS["body"],
+            width=260,
+            anchor="w"
+        ).pack(side="left", padx=(0, 10))
+        
+        self.point_earn_rate_entry = ctk.CTkEntry(
+            points_row,
+            font=("Sarabun", 18),
+            height=50,
+            width=150,
+            justify="center"
+        )
+        self.point_earn_rate_entry.insert(0, str(int(POINT_EARN_RATE)))
+        self.point_earn_rate_entry.pack(side="left", padx=(0, 10))
+        
+        ctk.CTkLabel(
+            points_row,
+            text="บาท = 1 แต้ม",
+            font=("Sarabun", 18, "bold")
+        ).pack(side="left")
+        
+        # เพิ่มแถวกำหนดมูลค่าการแลกแต้ม
+        points_redeem_row = ctk.CTkFrame(points_frame, fg_color="transparent")
+        points_redeem_row.pack(fill="x", padx=20, pady=(0, 20))
+        
+        ctk.CTkLabel(
+            points_redeem_row,
+            text="อัตราการแลกแต้ม (1 แต้ม คิดเป็นส่วนลด):",
+            font=FONTS["body"],
+            width=260,
+            anchor="w"
+        ).pack(side="left", padx=(0, 10))
+        
+        self.point_redeem_val_entry = ctk.CTkEntry(
+            points_redeem_row,
+            font=("Sarabun", 18),
+            height=50,
+            width=150,
+            justify="center"
+        )
+        self.point_redeem_val_entry.insert(0, str(int(POINT_REDEEM_VALUE) if POINT_REDEEM_VALUE == int(POINT_REDEEM_VALUE) else POINT_REDEEM_VALUE))
+        self.point_redeem_val_entry.pack(side="left", padx=(0, 10))
+        
+        ctk.CTkLabel(
+            points_redeem_row,
+            text="บาท",
+            font=("Sarabun", 18, "bold")
+        ).pack(side="left")
+        
         # ประเภทราคา
         price_frame = ctk.CTkFrame(content, fg_color=COLORS["light"], corner_radius=10)
         price_frame.pack(fill="x", padx=20, pady=(0, 20))
@@ -392,6 +458,54 @@ class SettingsFrame(ctk.CTkFrame):
             font=FONTS["body"],
             justify="left"
         ).pack(padx=20, pady=15)
+        
+        # ตั้งค่าสำรองข้อมูลอัตโนมัติ (Auto Backup Settings)
+        auto_backup_frame = ctk.CTkFrame(content, fg_color=COLORS["light"], corner_radius=10)
+        auto_backup_frame.pack(fill="x", padx=20, pady=(0, 20))
+        
+        ctk.CTkLabel(
+            auto_backup_frame,
+            text="⚙️ ตั้งค่าระบบสำรองข้อมูลอัตโนมัติ (Auto Backup)",
+            font=FONTS["heading"],
+            text_color=COLORS["primary"]
+        ).pack(padx=20, pady=(15, 10), anchor="w")
+        
+        # Checkbox เปิด/ปิด
+        self.auto_backup_enabled_var = ctk.BooleanVar(value=True)
+        self.auto_backup_enabled_cb = ctk.CTkCheckBox(
+            auto_backup_frame,
+            text="เปิดใช้งานการสำรองข้อมูลอัตโนมัติในเบื้องหลัง",
+            variable=self.auto_backup_enabled_var,
+            font=FONTS["body"]
+        )
+        self.auto_backup_enabled_cb.pack(padx=20, pady=5, anchor="w")
+        
+        # คอลัมน์ป้อนข้อมูล Interval และ Max Backups
+        input_row = ctk.CTkFrame(auto_backup_frame, fg_color="transparent")
+        input_row.pack(fill="x", padx=20, pady=(5, 15))
+        
+        ctk.CTkLabel(input_row, text="สำรองข้อมูลทุกๆ:", font=FONTS["body"]).pack(side="left", padx=(0, 5))
+        self.auto_backup_interval_entry = ctk.CTkEntry(input_row, width=80, font=FONTS["body"], justify="center")
+        self.auto_backup_interval_entry.pack(side="left", padx=5)
+        self.auto_backup_interval_entry.insert(0, "24")
+        ctk.CTkLabel(input_row, text="ชั่วโมง", font=FONTS["body"]).pack(side="left", padx=(0, 20))
+        
+        ctk.CTkLabel(input_row, text="จำนวนไฟล์สำรองสูงสุดที่ต้องการเก็บ:", font=FONTS["body"]).pack(side="left", padx=(0, 5))
+        self.auto_backup_max_entry = ctk.CTkEntry(input_row, width=80, font=FONTS["body"], justify="center")
+        self.auto_backup_max_entry.pack(side="left", padx=5)
+        self.auto_backup_max_entry.insert(0, "10")
+        ctk.CTkLabel(input_row, text="ไฟล์", font=FONTS["body"]).pack(side="left")
+        
+        save_auto_backup_btn = ctk.CTkButton(
+            auto_backup_frame,
+            text="💾 บันทึกการตั้งค่าสำรองข้อมูล",
+            font=FONTS["button"],
+            height=40,
+            width=250,
+            fg_color=COLORS["primary"],
+            command=self.save_auto_backup_settings
+        )
+        save_auto_backup_btn.pack(padx=20, pady=(0, 15), anchor="w")
         
         # ปุ่ม
         btn_frame = ctk.CTkFrame(content, fg_color="transparent")
@@ -846,6 +960,32 @@ class SettingsFrame(ctk.CTkFrame):
                 self.vat_entry.insert(0, f"{vat_val:.2f}".rstrip('0').rstrip('.'))
             except ValueError:
                 pass
+                
+        if 'point_earn_rate' in self.settings_dict:
+            try:
+                pts_rate = float(self.settings_dict['point_earn_rate'])
+                self.point_earn_rate_entry.delete(0, 'end')
+                self.point_earn_rate_entry.insert(0, str(int(pts_rate) if pts_rate == int(pts_rate) else pts_rate))
+            except ValueError:
+                pass
+                
+        if 'point_redeem_value' in self.settings_dict:
+            try:
+                pts_redeem = float(self.settings_dict['point_redeem_value'])
+                self.point_redeem_val_entry.delete(0, 'end')
+                self.point_redeem_val_entry.insert(0, str(int(pts_redeem) if pts_redeem == int(pts_redeem) else pts_redeem))
+            except ValueError:
+                pass
+
+        # แท็บสำรองข้อมูล (Auto Backup settings)
+        if 'auto_backup' in self.settings_dict:
+            self.auto_backup_enabled_var.set(self.settings_dict['auto_backup'] == 'True')
+        if 'backup_interval_hours' in self.settings_dict:
+            self.auto_backup_interval_entry.delete(0, 'end')
+            self.auto_backup_interval_entry.insert(0, self.settings_dict['backup_interval_hours'])
+        if 'max_backups' in self.settings_dict:
+            self.auto_backup_max_entry.delete(0, 'end')
+            self.auto_backup_max_entry.insert(0, self.settings_dict['max_backups'])
 
         # แท็บใบเสร็จ
         if 'receipt_message' in self.settings_dict:
@@ -905,16 +1045,49 @@ class SettingsFrame(ctk.CTkFrame):
         messagebox.showinfo("สำเร็จ", "บันทึกข้อมูลร้านสำเร็จ!")
     
     def save_tax_settings(self):
-        """บันทึกการตั้งค่าภาษี"""
+        """บันทึกการตั้งค่าภาษีและคะแนนสะสม"""
         try:
             vat = float(self.vat_entry.get()) / 100
+        except ValueError:
+            messagebox.showerror("ข้อผิดพลาด", "กรุณากรอกอัตราภาษีที่ถูกต้อง")
+            return
+
+        try:
+            pts_rate = float(self.point_earn_rate_entry.get())
+            if pts_rate <= 0:
+                raise ValueError()
+        except ValueError:
+            messagebox.showerror("ข้อผิดพลาด", "กรุณากรอกยอดซื้อขั้นต่ำเพื่อรับ 1 แต้มให้เป็นตัวเลขที่มากกว่า 0")
+            return
             
+        try:
+            pts_redeem = float(self.point_redeem_val_entry.get())
+            if pts_redeem <= 0:
+                raise ValueError()
+        except ValueError:
+            messagebox.showerror("ข้อผิดพลาด", "กรุณากรอกอัตราแลกแต้มให้เป็นตัวเลขที่มากกว่า 0")
+            return
+            
+        try:
             self.db.connect()
             self.db.execute("""
                 INSERT INTO settings (setting_key, setting_value)
                 VALUES ('tax_rate', ?)
                 ON CONFLICT(setting_key) DO UPDATE SET setting_value = ?
             """, (str(vat), str(vat)))
+            
+            self.db.execute("""
+                INSERT INTO settings (setting_key, setting_value)
+                VALUES ('point_earn_rate', ?)
+                ON CONFLICT(setting_key) DO UPDATE SET setting_value = ?
+            """, (str(pts_rate), str(pts_rate)))
+            
+            self.db.execute("""
+                INSERT INTO settings (setting_key, setting_value)
+                VALUES ('point_redeem_value', ?)
+                ON CONFLICT(setting_key) DO UPDATE SET setting_value = ?
+            """, (str(pts_redeem), str(pts_redeem)))
+            
             self.db.disconnect()
             
             # รีโหลดคอนฟิกในหน่วยความจำทันที
@@ -922,8 +1095,8 @@ class SettingsFrame(ctk.CTkFrame):
             load_config_from_db()
             
             messagebox.showinfo("สำเร็จ", "บันทึกการตั้งค่าสำเร็จ!")
-        except ValueError:
-            messagebox.showerror("ข้อผิดพลาด", "กรุณากรอกอัตราภาษีที่ถูกต้อง")
+        except Exception as e:
+            messagebox.showerror("ข้อผิดพลาด", f"ไม่สามารถบันทึกการตั้งค่าได้: {e}")
     
     def save_receipt_settings(self):
         """บันทึกการตั้งค่าใบเสร็จ"""
@@ -1088,12 +1261,18 @@ class SettingsFrame(ctk.CTkFrame):
             from config import DATABASE_PATH
             
             # Flush WAL log เข้าไฟล์หลักก่อนสำรอง (ป้องกันข้อมูลล่าสุดหายจาก WAL mode)
+            _bk_conn = None
             try:
                 _bk_conn = sqlite3.connect(DATABASE_PATH)
                 _bk_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                _bk_conn.close()
             except Exception:
                 pass  # ถ้า checkpoint ไม่ได้ก็ยังสำรองไปก่อน
+            finally:
+                if _bk_conn:
+                    try:
+                        _bk_conn.close()
+                    except:
+                        pass
             
             with zipfile.ZipFile(filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 # ฐานข้อมูล
@@ -1270,3 +1449,47 @@ class SettingsFrame(ctk.CTkFrame):
                 )
             except Exception as e:
                 messagebox.showerror("ข้อผิดพลาด", f"ไม่สามารถรีเซ็ตได้: {e}")
+                
+    def save_auto_backup_settings(self):
+        """บันทึกการตั้งค่าสำรองข้อมูลอัตโนมัติ"""
+        enabled = self.auto_backup_enabled_var.get()
+        try:
+            interval = int(self.auto_backup_interval_entry.get())
+            if interval <= 0:
+                raise ValueError()
+        except ValueError:
+            messagebox.showerror("ข้อผิดพลาด", "กรุณากรอกรอบการสำรองข้อมูลเป็นชั่วโมงและมากกว่า 0")
+            return
+            
+        try:
+            max_bu = int(self.auto_backup_max_entry.get())
+            if max_bu <= 0:
+                raise ValueError()
+        except ValueError:
+            messagebox.showerror("ข้อผิดพลาด", "กรุณากรอกจำนวนไฟล์เก็บรักษาเป็นจำนวนมากกว่า 0")
+            return
+            
+        try:
+            self.db.connect()
+            self.db.execute("""
+                INSERT INTO settings (setting_key, setting_value)
+                VALUES ('auto_backup', ?)
+                ON CONFLICT(setting_key) DO UPDATE SET setting_value = ?
+            """, (str(enabled), str(enabled)))
+            
+            self.db.execute("""
+                INSERT INTO settings (setting_key, setting_value)
+                VALUES ('backup_interval_hours', ?)
+                ON CONFLICT(setting_key) DO UPDATE SET setting_value = ?
+            """, (str(interval), str(interval)))
+            
+            self.db.execute("""
+                INSERT INTO settings (setting_key, setting_value)
+                VALUES ('max_backups', ?)
+                ON CONFLICT(setting_key) DO UPDATE SET setting_value = ?
+            """, (str(max_bu), str(max_bu)))
+            self.db.disconnect()
+            
+            messagebox.showinfo("สำเร็จ", "บันทึกการตั้งค่าสำรองข้อมูลอัตโนมัติสำเร็จ!")
+        except Exception as e:
+            messagebox.showerror("ข้อผิดพลาด", f"ไม่สามารถบันทึกการตั้งค่าได้: {e}")

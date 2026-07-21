@@ -18,7 +18,7 @@ import os
 # เพิ่ม path สำหรับ import
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from ui import LoginWindow, MainWindow
+from ui import LoginWindow, MainWindow, SplashScreen
 from ui.activation_window import ActivationWindow
 from utils.license_system import LicenseManager
 from utils.logger import get_logger, log_info, log_error, log_user_action, new_log_session
@@ -78,77 +78,117 @@ def register_process_font():
         print(f"Failed to register process font: {e}")
 
 def main():
-    """ฟังก์ชันหลักของโปรแกรม"""
+    """ฟังก์ชันหลักของโปรแกรม (Multi-threaded Edition สำหรับคอมพิวเตอร์รุ่นเก่า)"""
     try:
-        ensure_directories()
-        register_process_font()
-        logger.info("Starting POS System...")
+        splash = SplashScreen("StorePOS", "ระบบจัดการร้านค้าและขายหน้าร้าน")
         
-        # ตรวจสอบ Activation ก่อน
-        logger.info("🔐 Checking activation status...")
-        is_activated, message, license_data = LicenseManager.check_activation()
-        
-        if not is_activated:
-            logger.warning(f"❌ โปรแกรมยังไม่ได้ Activate: {message}")
-            print(f"Program not activated: {message}")
+        def task_dirs():
+            ensure_directories()
             
-            # สร้าง root window ชั่วคราว
-            root = ctk.CTk()
-            root.withdraw()
+        def task_font():
+            register_process_font()
             
-            # แสดงหน้า Activation
-            logger.info("🔑 Opening activation window...")
-            activation_window = ActivationWindow(root, on_success=lambda: logger.info("✅ Activation สำเร็จ!"))
-            root.wait_window(activation_window)
+        def task_backup():
+            try:
+                import threading
+                from utils import run_auto_backup
+                threading.Thread(target=run_auto_backup, daemon=True).start()
+            except Exception as e:
+                logger.error(f"Failed to start auto backup: {e}")
+                
+        def task_lic():
+            return LicenseManager.check_activation()
             
-            # ตรวจสอบอีกครั้งหลัง Activate
-            is_activated, message, license_data = LicenseManager.check_activation()
-            root.destroy()
-            
+        def task_db():
+            from database import DatabaseManager
+            db_mgr = DatabaseManager()
+            db_mgr.initialize_database()
+
+        tasks = [
+            ("dirs", "กำลังตรวจสอบโครงสร้างโฟลเดอร์...", task_dirs),
+            ("font", "กำลังลงทะเบียนฟอนต์ภาษาไทย...", task_font),
+            ("backup", "กำลังเริ่มต้นระบบ Auto Backup ในพื้นหลัง...", task_backup),
+            ("license", "🔐 กำลังตรวจสอบสิทธิ์การใช้งาน (License)...", task_lic),
+            ("db", "💾 กำลังเตรียมฐานข้อมูลและโครงสร้างระบบ...", task_db),
+        ]
+
+        def on_loading_complete(results):
+            lic_res = results.get("license")
+            if lic_res and isinstance(lic_res, tuple):
+                is_activated, message, license_data = lic_res
+            else:
+                is_activated, message, license_data = False, "Unknown license status", None
+
             if not is_activated:
-                logger.warning("❌ ยกเลิกการใช้งาน - ไม่มี Activation")
-                print("Exit - No Activation")
-                sys.exit(0)
-        else:
-            logger.info(f"✅ โปรแกรมได้รับการ Activate แล้ว")
-            logger.info(f"📅 หมดอายุ: {license_data.get('expire_date', 'N/A')}")
-            print(f"Program activated")
-            print(f"Expiry: {license_data.get('expire_date', 'N/A')}")
-        
-        # === ตรวจสอบ License ใกล้หมดอายุ ===
-        if is_activated and license_data:
-            warning_info = LicenseManager.get_expiry_warning(license_data)
-            
-            if warning_info and warning_info['level'] != 'none':
-                from tkinter import messagebox as mb
-                import customtkinter as _ctk
+                logger.warning(f"❌ โปรแกรมยังไม่ได้ Activate: {message}")
+                print(f"Program not activated: {message}")
                 
-                # สร้าง root ชั่วคราวเพื่อแสดง dialog
-                _root = _ctk.CTk()
-                _root.withdraw()
+                root = ctk.CTk()
+                root.withdraw()
+                logger.info("🔑 Opening activation window...")
+                activation_window = ActivationWindow(root, on_success=lambda: logger.info("✅ Activation สำเร็จ!"))
+                root.wait_window(activation_window)
                 
-                level = warning_info['level']
-                title = warning_info['title']
-                message = warning_info['message']
+                is_activated, message, license_data = LicenseManager.check_activation()
+                root.destroy()
                 
-                logger.warning(f"⚠️ License Warning: {warning_info['level']} - เหลือ {warning_info['days_left']} วัน")
-                
-                if level == 'expired':
-                    mb.showerror(title, message, parent=_root)
-                    logger.warning("❌ License หมดอายุ - ปิดโปรแกรม")
-                    _root.destroy()
+                if not is_activated:
+                    logger.warning("❌ ยกเลิกการใช้งาน - ไม่มี Activation")
+                    print("Exit - No Activation")
                     sys.exit(0)
-                elif level == 'critical':
-                    mb.showwarning(title, message, parent=_root)
-                else:  # warning
-                    mb.showinfo(title, message, parent=_root)
-                    
-                _root.destroy()
-        
-        # แสดงหน้า Login
-        logger.info("Opening login window...")
-        login_app = LoginWindow()
-        user_id, user_info = login_app.run()
+            else:
+                logger.info(f"✅ โปรแกรมได้รับการ Activate แล้ว")
+                logger.info(f"📅 หมดอายุ: {license_data.get('expire_date', 'N/A')}")
+                print(f"Program activated")
+
+            # ตรวจสอบ License ใกล้หมดอายุ
+            if is_activated and license_data:
+                warning_info = LicenseManager.get_expiry_warning(license_data)
+                if warning_info and warning_info['level'] != 'none':
+                    from tkinter import messagebox as mb
+                    import customtkinter as _ctk
+                    _root = _ctk.CTk()
+                    _root.withdraw()
+                    level = warning_info['level']
+                    title = warning_info['title']
+                    msg = warning_info['message']
+                    if level == 'expired':
+                        mb.showerror(title, msg, parent=_root)
+                        _root.destroy()
+                        sys.exit(0)
+                    elif level == 'critical':
+                        mb.showwarning(title, msg, parent=_root)
+                    else:
+                        mb.showinfo(title, msg, parent=_root)
+                    _root.destroy()
+
+            # แสดงหน้า Login
+            logger.info("Opening login window...")
+            login_app = LoginWindow(license_data)
+            user_id, user_info = login_app.run()
+
+            
+            if user_id and user_info:
+                full_name = user_info['full_name'] if 'full_name' in user_info.keys() else 'Unknown'
+                log_user_action(user_id, "LOGIN", f"User: {full_name}")
+                logger.info(f"User {user_id} logged in: {full_name}")
+                
+                new_log_session("USER_LOGIN")
+                
+                main_app = MainWindow(user_id, user_info)
+                main_app.run()
+                
+                logger.info(f"User {user_id} logged out")
+            else:
+                logger.info("Cancelled - No Login")
+                print("Cancelled - No Login")
+            
+            logger.info("POS System Stopped")
+            logger.info("="*70)
+
+        splash.run_tasks_threaded(tasks, on_loading_complete)
+
+
         
         # ถ้า login สำเร็จ เปิดหน้าหลัก
         if user_id and user_info:
@@ -180,6 +220,13 @@ def main():
         import traceback
         traceback.print_exc()
         sys.exit(1)
+    finally:
+        try:
+            from database.db_manager import DatabaseManager
+            DatabaseManager.close_all_connections()
+        except Exception:
+            pass
+
 
 
 if __name__ == "__main__":

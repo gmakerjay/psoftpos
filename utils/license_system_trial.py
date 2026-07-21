@@ -377,10 +377,9 @@ class LicenseManager:
             return False, f"ตรวจพบการโกงเวลาเครื่อง! เวลาปัจจุบันก่อนวันเริ่มทดลองใช้งาน (เริ่มทดลอง: {trial_start.strftime('%Y-%m-%d %H:%M:%S')})", None
             
         # 4. คำนวณวันใช้งานคงเหลือ
-        days_used = (current_time - trial_start).days
-        days_left = max(0, 15 - days_used)
-        
-        expire_date = trial_start + timedelta(days=15)
+        expire_date = (trial_start + timedelta(days=15)).date()
+        current_date = current_time.date()
+        days_left = (expire_date - current_date).days
         expire_date_str = expire_date.strftime("%Y-%m-%d")
         
         # 5. สิทธิ์ฟังก์ชันทั้งหมดเปิดให้ใช้งานครบถ้วนเหมือนเวอร์ชันเต็ม
@@ -402,10 +401,10 @@ class LicenseManager:
             "features": features,
             "issued_date": trial_start.strftime("%Y-%m-%d %H:%M:%S"),
             "is_trial": True,
-            "days_left": days_left
+            "days_left": max(0, days_left)
         }
         
-        if days_used >= 15:
+        if current_date > expire_date:
             return False, f"เวอร์ชันทดลองใช้ฟรีหมดอายุแล้วเมื่อ {expire_date_str}", license_data
             
         return True, f"เวอร์ชันทดลองใช้งานคงเหลือ {days_left} วัน (หมดอายุ: {expire_date_str})", license_data

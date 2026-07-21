@@ -148,6 +148,8 @@ PERMISSIONS = {
 
 # ภาษี
 TAX_RATE = 0.07  # VAT 7%
+POINT_EARN_RATE = 100.0  # ยอดซื้อขั้นต่ำ (บาท) เพื่อรับ 1 แต้ม
+POINT_REDEEM_VALUE = 1.0  # มูลค่าส่วนลดต่อ 1 แต้ม (เช่น 1 แต้ม = 1 บาท)
 
 # โหมดประสิทธิภาพ (สำหรับคอมรุ่นเก่า)
 PERFORMANCE_MODE = {
@@ -224,7 +226,7 @@ MESSAGES = {
 def load_config_from_db():
     """ดึงข้อมูลการตั้งค่าจากฐานข้อมูลมาอัปเดตลงในตัวแปร TAX_RATE และ COMPANY_INFO"""
     import sqlite3
-    global TAX_RATE, COMPANY_INFO
+    global TAX_RATE, COMPANY_INFO, POINT_EARN_RATE, POINT_REDEEM_VALUE
     try:
         # ตรวจสอบว่ามีไฟล์ฐานข้อมูลอยู่จริง
         db_path = str(DATABASE_PATH)
@@ -251,6 +253,20 @@ def load_config_from_db():
         if 'tax_rate' in settings:
             try:
                 TAX_RATE = float(settings['tax_rate'])
+            except ValueError:
+                pass
+                
+        # อัปเดต POINT_EARN_RATE
+        if 'point_earn_rate' in settings:
+            try:
+                POINT_EARN_RATE = float(settings['point_earn_rate'])
+            except ValueError:
+                pass
+                
+        # อัปเดต POINT_REDEEM_VALUE
+        if 'point_redeem_value' in settings:
+            try:
+                POINT_REDEEM_VALUE = float(settings['point_redeem_value'])
             except ValueError:
                 pass
                 

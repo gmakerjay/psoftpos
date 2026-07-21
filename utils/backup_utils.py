@@ -174,6 +174,115 @@ class SalesLogManager:
         except:
             return "ไม่สามารถอ่านข้อมูลได้"
 
+def run_auto_backup():
+    """ทำการสำรองข้อมูลอัตโนมัติ (Auto Backup) แบบเบื้องหลัง"""
+    try:
+        import zipfile
+        import sqlite3
+        from datetime import datetime, timedelta
+        from config import DATABASE_PATH, BACKUP_DIR, PRODUCTS_IMG_DIR
+        
+        # 1. ตรวจสอบว่าเปิดใช้ Auto Backup หรือไม่
+        db = None
+        auto_enabled = True
+        interval_hours = 24
+        max_backups = 10
+        
+        try:
+            db = sqlite3.connect(str(DATABASE_PATH))
+            db.row_factory = sqlite3.Row
+            cursor = db.cursor()
+            cursor.execute("SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('auto_backup', 'backup_interval_hours', 'max_backups')")
+            rows = cursor.fetchall()
+            settings = {row['setting_key']: row['setting_value'] for row in rows}
+            
+            if 'auto_backup' in settings:
+                auto_enabled = settings['auto_backup'].lower() in ('true', '1')
+            if 'backup_interval_hours' in settings:
+                interval_hours = int(settings['backup_interval_hours'])
+            if 'max_backups' in settings:
+                max_backups = int(settings['max_backups'])
+        except Exception:
+            # ใช้ค่าจาก config / performance_config เป็นค่าเริ่มต้น
+            try:
+                import performance_config
+                auto_enabled = performance_config.ENABLE_AUTO_BACKUP
+                interval_hours = performance_config.AUTO_BACKUP_INTERVAL_HOURS
+            except ImportError:
+                pass
+        finally:
+            if db:
+                db.close()
+                
+        if not auto_enabled:
+            return
+            
+        # 2. ตรวจสอบความถี่ (Interval)
+        # ตรวจสอบไฟล์ใน BACKUP_DIR ที่ขึ้นต้นด้วย "auto_backup_"
+        if not BACKUP_DIR.exists():
+            BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+            
+        auto_backups = sorted(
+            [f for f in BACKUP_DIR.glob("auto_backup_*.zip")],
+            key=lambda x: x.stat().st_mtime
+        )
+        
+        now = datetime.now()
+        if auto_backups:
+            latest_backup = auto_backups[-1]
+            last_backup_time = datetime.fromtimestamp(latest_backup.stat().st_mtime)
+            if now - last_backup_time < timedelta(hours=interval_hours):
+                # ยังไม่ถึงเวลาสำรองข้อมูลใหม่
+                return
+                
+        # 3. เริ่มทำการสำรองข้อมูล
+        timestamp = now.strftime("%Y%m%d_%H%M%S")
+        backup_file = BACKUP_DIR / f"auto_backup_{timestamp}.zip"
+        
+        # Flush WAL
+        _bk_conn = None
+        try:
+            _bk_conn = sqlite3.connect(str(DATABASE_PATH))
+            _bk_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception:
+            pass
+        finally:
+            if _bk_conn:
+                _bk_conn.close()
+                
+        # สร้าง ZIP
+        with zipfile.ZipFile(backup_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            if DATABASE_PATH.exists():
+                zipf.write(str(DATABASE_PATH), "database.db")
+                
+            if PRODUCTS_IMG_DIR.exists():
+                for img_file in PRODUCTS_IMG_DIR.glob("*"):
+                    if img_file.is_file():
+                        zipf.write(img_file, f"products_img/{img_file.name}")
+                        
+            receipt_dir = Path("data/receipts")
+            if receipt_dir.exists():
+                for receipt_file in receipt_dir.glob("*.pdf"):
+                    zipf.write(receipt_file, f"receipts/{receipt_file.name}")
+                    
+        print(f"Auto backup completed: {backup_file}")
+        
+        # 4. ลบไฟล์สำรองเก่าที่เกินจำนวน max_backups
+        auto_backups = sorted(
+            [f for f in BACKUP_DIR.glob("auto_backup_*.zip")],
+            key=lambda x: x.stat().st_mtime
+        )
+        while len(auto_backups) > max_backups:
+            oldest = auto_backups.pop(0)
+            try:
+                oldest.unlink()
+                print(f"Deleted old backup: {oldest}")
+            except Exception:
+                pass
+                
+    except Exception as e:
+        print(f"Error during auto backup: {e}")
+
 if __name__ == "__main__":
     # Test
     bm = BackupManager()

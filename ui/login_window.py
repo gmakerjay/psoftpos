@@ -13,17 +13,18 @@ import sys
 class LoginWindow:
     """หน้าล็อกอินเข้าสู่ระบบ"""
     
-    def __init__(self):
+    def __init__(self, license_data=None):
         self.window = ctk.CTk()
         self.window.title(f"{APP_NAME} - เข้าสู่ระบบ")
         self.window.geometry("500x600")
         self.window.resizable(False, False)
+        self.license_data = license_data
         
         # ตั้งค่าไอคอนหน้าต่าง
         try:
             icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "icon.ico")
             if os.path.exists(icon_path):
-                self.window.after(200, lambda: self.window.iconbitmap(icon_path))
+                self.window.after(100, lambda: self.window.iconbitmap(icon_path))
         except Exception as e:
             print(f"Error loading icon: {e}")
         
@@ -79,14 +80,9 @@ class LoginWindow:
         
         # ตรวจสอบสิทธิ์ว่ามีข้อมูลทดลองใช้งานหรือไม่
         trial_info_text = None
-        try:
-            from utils.license_system import LicenseManager
-            is_val, msg, lic_data = LicenseManager.check_activation()
-            if lic_data and lic_data.get('is_trial'):
-                days_left = lic_data.get('days_left', 0)
-                trial_info_text = f"⚠️ เวอร์ชันทดลองใช้งาน (คงเหลือ {days_left} วัน)"
-        except Exception:
-            pass
+        if self.license_data and self.license_data.get('is_trial'):
+            days_left = self.license_data.get('days_left', 0)
+            trial_info_text = f"⚠️ เวอร์ชันทดลองใช้งาน (คงเหลือ {days_left} วัน)"
 
         if trial_info_text:
             trial_badge = ctk.CTkLabel(
@@ -96,6 +92,7 @@ class LoginWindow:
                 text_color="#FFEB3B"
             )
             trial_badge.pack(pady=(0, 15))
+
             
         # ฟอร์มล็อกอิน
         login_frame = ctk.CTkFrame(main_frame, fg_color="white", corner_radius=15)
@@ -231,18 +228,9 @@ class LoginWindow:
             
     def run(self):
         """เริ่มโปรแกรม"""
-        # สร้างฐานข้อมูลถ้ายังไม่มี
-        self.db.connect()
-        self.db.initialize_database()
-        self.db.disconnect()
-        
-        # โหลดคอนฟิกจากฐานข้อมูล
-        from config import load_config_from_db
-        load_config_from_db()
-        
         self.window.mainloop()
-        
         return self.user_id, self.user_info
+
 
 
 if __name__ == "__main__":

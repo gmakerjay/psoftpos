@@ -489,16 +489,20 @@ class KeyGenApp(ctk.CTk):
         try:
             if sys.argv and sys.argv[0]:
                 possible_paths.append(Path(sys.argv[0]).parent.absolute() / "data" / ".license")
+                possible_paths.append(Path(sys.argv[0]).parent.absolute() / "data" / ".license_3days")
         except: pass
         try:
             if getattr(sys, 'frozen', False):
                 possible_paths.append(Path(sys.executable).parent.absolute() / "data" / ".license")
+                possible_paths.append(Path(sys.executable).parent.absolute() / "data" / ".license_3days")
         except: pass
         try:
             possible_paths.append(Path(__file__).parent.parent.absolute() / "data" / ".license")
+            possible_paths.append(Path(__file__).parent.parent.absolute() / "data" / ".license_3days")
         except: pass
         try:
             possible_paths.append(Path("data/.license").absolute())
+            possible_paths.append(Path("data/.license_3days").absolute())
         except: pass
         
         standard_folders = [
@@ -513,6 +517,7 @@ class KeyGenApp(ctk.CTk):
         ]
         for folder in standard_folders:
             possible_paths.append(Path(folder) / "data" / ".license")
+            possible_paths.append(Path(folder) / "data" / ".license_3days")
             
         found_files = []
         seen = set()
@@ -622,7 +627,9 @@ class KeyGenApp(ctk.CTk):
         ]
         for folder in standard_folders:
             trial_paths.append(Path(folder) / "data" / ".trial")
+            trial_paths.append(Path(folder) / "data" / ".trial_3days")
         trial_paths.append(Path("data/.trial").absolute())
+        trial_paths.append(Path("data/.trial_3days").absolute())
         
         deleted_trials = 0
         seen = set()
@@ -661,8 +668,7 @@ class KeyGenApp(ctk.CTk):
                         conn = sqlite3.connect(normalized)
                         cursor = conn.cursor()
                         # ลบประวัติ
-                        cursor.execute("DELETE FROM settings WHERE setting_key = 'last_run_timestamp'")
-                        cursor.execute("DELETE FROM settings WHERE setting_key = 'trial_start_date'")
+                        cursor.execute("DELETE FROM settings WHERE setting_key IN ('last_run_timestamp', 'trial_start_date', 'last_run_timestamp_3days', 'trial_start_date_3days')")
                         try:
                             cursor.execute("DELETE FROM license_logs")
                         except:
