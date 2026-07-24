@@ -145,6 +145,8 @@ class MainWindow:
 
     def create_layout(self):
         """สร้างโครงสร้างหน้าหลัก"""
+        self.is_sidebar_collapsed = False
+        
         # แถบด้านบน (Header)
         self.create_header()
         
@@ -165,6 +167,20 @@ class MainWindow:
         header.pack(fill="x", padx=8, pady=(6, 4))
         header.pack_propagate(False)
         
+        # ปุ่มซ่อน/แสดง Sidebar (☰)
+        self.toggle_sidebar_btn = ctk.CTkButton(
+            header,
+            text="☰",
+            font=("Arial", 18, "bold"),
+            width=38,
+            height=34,
+            fg_color="transparent",
+            hover_color="#1d4ed8",
+            text_color="white",
+            command=self.toggle_sidebar
+        )
+        self.toggle_sidebar_btn.pack(side="left", padx=(8, 2))
+
         # ชื่อโปรแกรม
         title_label = ctk.CTkLabel(
             header,
@@ -172,7 +188,7 @@ class MainWindow:
             font=("Sarabun", 18, "bold"),
             text_color="white"
         )
-        title_label.pack(side="left", padx=15)
+        title_label.pack(side="left", padx=10)
         
         # ข้อมูลผู้ใช้และเวลา
         user_frame = ctk.CTkFrame(header, fg_color="transparent")
@@ -198,6 +214,22 @@ class MainWindow:
         
         # อัพเดทเวลาทุกวินาที
         self.update_time()
+
+    def toggle_sidebar(self):
+        """ซ่อนหรือเปิดแถบเมนูด้านข้าง (Sidebar) แบบหุบไปด้านข้าง"""
+        if not hasattr(self, 'sidebar') or not self.sidebar:
+            return
+            
+        if self.is_sidebar_collapsed:
+            # เปิด Sidebar กลับมา
+            self.sidebar.pack(side="left", fill="y", padx=0, pady=0, before=self.content_area)
+            self.is_sidebar_collapsed = False
+            self.toggle_sidebar_btn.configure(text="☰")
+        else:
+            # ซ่อน Sidebar หุบไปด้านข้าง
+            self.sidebar.pack_forget()
+            self.is_sidebar_collapsed = True
+            self.toggle_sidebar_btn.configure(text="☰ เมนู")
         
     def update_time(self):
         """อัพเดทเวลาปัจจุบัน (ทุก 10 วินาทีเพื่อประหยัด CPU)"""
@@ -211,9 +243,10 @@ class MainWindow:
         
     def create_sidebar(self, parent):
         """สร้างแถบเมนูด้านข้าง (ปรับขนาดปุ่มเป็น 38px เพื่อให้ครบทุกเมนูบนจอ 700px)"""
-        sidebar = ctk.CTkFrame(parent, width=220, fg_color=COLORS["dark"])
-        sidebar.pack(side="left", fill="y", padx=0, pady=0)
-        sidebar.pack_propagate(False)
+        self.sidebar = ctk.CTkFrame(parent, width=220, fg_color=COLORS["dark"])
+        self.sidebar.pack(side="left", fill="y", padx=0, pady=0)
+        self.sidebar.pack_propagate(False)
+        sidebar = self.sidebar
         
         # เมนูหลัก (ไม่มีอิโมจิ — ชิดซ้าย ตัวหนา)
         menu_items = [

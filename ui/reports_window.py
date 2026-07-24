@@ -10,7 +10,7 @@ from database import DatabaseManager
 from config import *
 from datetime import datetime, timedelta
 from tkcalendar import DateEntry
-from utils import SalesLogManager
+from utils import SalesLogManager, ExcelManager
 from pathlib import Path
 import openpyxl
 import re
@@ -666,48 +666,33 @@ class ReportsFrame(ctk.CTkFrame):
                 if sales:
                     excel_path = Path("Backup") / f"ยอดขาย_ปิดร้าน_{today}.xlsx"
                     
-                    wb = openpyxl.Workbook()
-                    ws = wb.active
-                    ws.title = "ยอดขาย"
-                    
-                    headers = [
+                    columns = [
                         "เลขที่", "วันที่/เวลา", "ยอดรวม", "ส่วนลด", "ภาษี", 
                         "ยอดสุทธิ", "รับเงิน", "เงินทอน", "วิธีชำระ", "สถานะ",
                         "พนักงาน", "รายการสินค้า"
                     ]
                     
-                    for col, header in enumerate(headers, 1):
-                        cell = ws.cell(1, col, header)
-                        cell.font = openpyxl.styles.Font(bold=True, color="FFFFFF")
-                        cell.fill = openpyxl.styles.PatternFill(start_color="1F538D", fill_type="solid")
+                    export_data = []
+                    for sale in sales:
+                        export_data.append({
+                            "เลขที่": sale['sale_number'],
+                            "วันที่/เวลา": sale['sale_date'],
+                            "ยอดรวม": sale['subtotal'],
+                            "ส่วนลด": sale['discount_amount'],
+                            "ภาษี": sale['tax_amount'],
+                            "ยอดสุทธิ": sale['total_amount'],
+                            "รับเงิน": sale['paid_amount'],
+                            "เงินทอน": sale['change_amount'],
+                            "วิธีชำระ": sale['payment_method'],
+                            "สถานะ": sale['status'],
+                            "พนักงาน": sale['cashier_name'],
+                            "รายการสินค้า": sale['items'] or '-'
+                        })
                     
-                    for row, sale in enumerate(sales, 2):
-                        ws.cell(row, 1, sale['sale_number'])
-                        ws.cell(row, 2, sale['sale_date'])
-                        ws.cell(row, 3, sale['subtotal'])
-                        ws.cell(row, 4, sale['discount_amount'])
-                        ws.cell(row, 5, sale['tax_amount'])
-                        ws.cell(row, 6, sale['total_amount'])
-                        ws.cell(row, 7, sale['paid_amount'])
-                        ws.cell(row, 8, sale['change_amount'])
-                        ws.cell(row, 9, sale['payment_method'])
-                        ws.cell(row, 10, sale['status'])
-                        ws.cell(row, 11, sale['cashier_name'])
-                        ws.cell(row, 12, sale['items'] or '-')
-                    
-                    for col_cells in ws.columns:
-                        max_length = 0
-                        column = col_cells[0].column_letter
-                        for cell in col_cells:
-                            try:
-                                if len(str(cell.value)) > max_length:
-                                    max_length = len(str(cell.value))
-                            except:
-                                pass
-                        ws.column_dimensions[column].width = min(max_length + 2, 50)
-                    
-                    wb.save(str(excel_path))
-                    backup_results.append(f"📊 Excel: {excel_path.name}")
+                    if ExcelManager.export_to_excel(export_data, columns, str(excel_path), sheet_name="ยอดขาย", title=f"รายงานปิดยอดขายประจำวัน ({today})"):
+                        backup_results.append(f"📊 Excel: {excel_path.name}")
+                    else:
+                        backup_results.append("📊 Excel: ❌ ล้มเหลว")
                 else:
                     backup_results.append("📊 Excel: ไม่มีข้อมูลให้ export")
                     
@@ -748,7 +733,7 @@ class ReportsFrame(ctk.CTkFrame):
             self.load_db_summary()
 
     # =====================================================
-    # LOGIC — Export Excel (ย้ายมาจาก history_window)
+    # LOGIC — Export Excel (ใช้ ExcelManager 100%)
     # =====================================================
     def export_to_excel(self):
         """Export ข้อมูลยอดขายเป็น Excel"""
@@ -785,52 +770,41 @@ class ReportsFrame(ctk.CTkFrame):
         if not filename:
             return
         
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "ยอดขาย"
-        
-        headers = [
+        columns = [
             "เลขที่", "วันที่/เวลา", "ยอดรวม", "ส่วนลด", "ภาษี", 
             "ยอดสุทธิ", "รับเงิน", "เงินทอน", "วิธีชำระ", "สถานะ",
             "พนักงาน", "รายการสินค้า"
         ]
         
-        for col, header in enumerate(headers, 1):
-            cell = ws.cell(1, col, header)
-            cell.font = openpyxl.styles.Font(bold=True, color="FFFFFF")
-            cell.fill = openpyxl.styles.PatternFill(start_color="1F538D", fill_type="solid")
+        export_data = []
+        for sale in sales:
+            export_data.append({
+                "เลขที่": sale['sale_number'],
+                "วันที่/เวลา": sale['sale_date'],
+                "ยอดรวม": sale['subtotal'],
+                "ส่วนลด": sale['discount_amount'],
+                "ภาษี": sale['tax_amount'],
+                "ยอดสุทธิ": sale['total_amount'],
+                "รับเงิน": sale['paid_amount'],
+                "เงินทอน": sale['change_amount'],
+                "วิธีชำระ": sale['payment_method'],
+                "สถานะ": sale['status'],
+                "พนักงาน": sale['cashier_name'],
+                "รายการสินค้า": sale['items'] or '-'
+            })
         
-        for row, sale in enumerate(sales, 2):
-            ws.cell(row, 1, sale['sale_number'])
-            ws.cell(row, 2, sale['sale_date'])
-            ws.cell(row, 3, sale['subtotal'])
-            ws.cell(row, 4, sale['discount_amount'])
-            ws.cell(row, 5, sale['tax_amount'])
-            ws.cell(row, 6, sale['total_amount'])
-            ws.cell(row, 7, sale['paid_amount'])
-            ws.cell(row, 8, sale['change_amount'])
-            ws.cell(row, 9, sale['payment_method'])
-            ws.cell(row, 10, sale['status'])
-            ws.cell(row, 11, sale['cashier_name'])
-            ws.cell(row, 12, sale['items'] or '-')
+        success = ExcelManager.export_to_excel(
+            export_data,
+            columns,
+            filename,
+            sheet_name="ยอดขาย",
+            title=f"รายงานสรุปยอดขาย ({start} ถึง {end})"
+        )
         
-        # ปรับความกว้างคอลัมน์
-        for col in ws.columns:
-            max_length = 0
-            column = col[0].column_letter
-            for cell in col:
-                try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                except:
-                    pass
-            ws.column_dimensions[column].width = min(max_length + 2, 50)
-        
-        try:
-            wb.save(filename)
-            messagebox.showinfo("สำเร็จ", f"Export สำเร็จ!\nบันทึกที่: {filename}")
-        except Exception as e:
-            messagebox.showerror("ข้อผิดพลาด", f"ไม่สามารถบันทึกไฟล์ได้: {e}")
+        if success:
+            messagebox.showinfo("สำเร็จ", f"Export สำเร็จ 100%!\nบันทึกที่: {filename}")
+        else:
+            messagebox.showerror("ข้อผิดพลาด", "ไม่สามารถบันทึกไฟล์ Excel ได้")
 
     # =====================================================
     # LOGIC — TAB 3: สินค้าขายดี

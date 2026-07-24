@@ -14,6 +14,7 @@ from config import *
 from datetime import datetime
 from tkcalendar import DateEntry
 from tkinter import filedialog
+from utils import ExcelManager
 
 
 class SalesHistoryFrame(ctk.CTkFrame):
@@ -145,18 +146,25 @@ class SalesHistoryFrame(ctk.CTkFrame):
         header_row.pack(fill="x")
         
         headers = [
-            ("เลขที่", 130),
-            ("เวลา/วันที่", 110),
-            ("จำนวน", 60),
-            ("ยอดรวม", 100),
-            ("ส่วนลด", 80),
-            ("ยอดสุทธิ", 110),
-            ("พนักงาน", 100),
-            ("สถานะ", 100),
-            ("รายการสินค้า", 220),
-            ("จัดการ", 240)
+            ("เลขที่", 115),
+            ("เวลา/วันที่", 95),
+            ("จำนวน", 45),
+            ("ยอดรวม", 80),
+            ("ส่วนลด", 65),
+            ("ยอดสุทธิ", 90),
+            ("พนักงาน", 85),
+            ("สถานะ", 85),
         ]
         
+        # ปุ่มจัดการชิดขวา (เว้นระยะขวา 22px สำหรับ Scrollbar เพื่อไม่ให้บังปุ่มลบ)
+        ctk.CTkLabel(
+            header_row,
+            text="จัดการ",
+            font=FONTS["button"],
+            text_color="white",
+            width=235
+        ).pack(side="right", padx=(3, 22), pady=10)
+
         for header, width in headers:
             label = ctk.CTkLabel(
                 header_row,
@@ -166,6 +174,15 @@ class SalesHistoryFrame(ctk.CTkFrame):
                 width=width
             )
             label.pack(side="left", padx=3, pady=10)
+
+        # รายการสินค้ายืดหยุ่น
+        ctk.CTkLabel(
+            header_row,
+            text="รายการสินค้า",
+            font=FONTS["button"],
+            text_color="white",
+            anchor="w"
+        ).pack(side="left", fill="x", expand=True, padx=3, pady=10)
         
         # รายการ
         self.sales_container = ctk.CTkScrollableFrame(
@@ -243,7 +260,7 @@ class SalesHistoryFrame(ctk.CTkFrame):
             WHERE s.sale_date >= ? AND s.sale_date <= ? {search_query}
             GROUP BY s.sale_id
             ORDER BY s.sale_date DESC
-            LIMIT ?
+LIMIT ?
         """, tuple(params))
         self.db.disconnect()
         
@@ -277,7 +294,7 @@ class SalesHistoryFrame(ctk.CTkFrame):
             self.create_sale_row(sale, idx)
             
     def create_sale_row(self, sale, index):
-        """สร้างแถวรายการขาย"""
+        """สร้างแถวรายการขาย (Responsive: ปุ่มจัดการชิดขวาสุด รายการสินค้ายืดตามพื้นที่)"""
         is_voided = sale['status'] in ('voided', 'returned')
         
         if is_voided:
@@ -285,16 +302,89 @@ class SalesHistoryFrame(ctk.CTkFrame):
         else:
             bg_color = COLORS["light"] if index % 2 == 0 else "white"
         
-        row = ctk.CTkFrame(self.sales_container, fg_color=bg_color, height=60)
+        row = ctk.CTkFrame(self.sales_container, fg_color=bg_color, height=54)
         row.pack(fill="x", pady=1)
         row.pack_propagate(False)
         
+        # ปุ่มจัดการ (ตรึงชิดขวา พร้อมเว้นระยะขวา 22px หลบ Scrollbar เพื่อให้ปุ่มลบ 🗑️ แสดงผล 100%)
+        btn_frame = ctk.CTkFrame(row, fg_color="transparent", width=235)
+        btn_frame.pack(side="right", padx=(3, 22))
+        btn_frame.pack_propagate(False)
+        
+        # ดูรายละเอียด
+        ctk.CTkButton(
+            btn_frame,
+            text="👁️",
+            font=("Arial", 13),
+            width=28,
+            height=28,
+            fg_color=COLORS["info"],
+            command=lambda s=sale: self.view_sale_detail(s)
+        ).pack(side="left", padx=1)
+        
+        # พิมพ์ใบเสร็จ
+        ctk.CTkButton(
+            btn_frame,
+            text="🖨️",
+            font=("Arial", 13),
+            width=28,
+            height=28,
+            fg_color=COLORS["secondary"],
+            command=lambda s=sale: self.print_receipt(s)
+        ).pack(side="left", padx=1)
+        
+        # ส่งออก PDF (ใบเสร็จ)
+        ctk.CTkButton(
+            btn_frame,
+            text="📄",
+            font=("Arial", 13),
+            width=28,
+            height=28,
+            fg_color="#6366f1",
+            command=lambda s=sale: self.export_sale_to_pdf(s)
+        ).pack(side="left", padx=1)
+        
+        # พิมพ์บิล A4 เต็มรูป
+        ctk.CTkButton(
+            btn_frame,
+            text="A4",
+            font=("Sarabun", 11, "bold"),
+            width=34,
+            height=28,
+            fg_color="#10B981",
+            command=lambda s=sale: self.open_a4_invoice_dialog(s)
+        ).pack(side="left", padx=1)
+        
+        # ยกเลิกบิล (เฉพาะบิลที่ completed เท่านั้น)
+        if not is_voided:
+            ctk.CTkButton(
+                btn_frame,
+                text="🚫",
+                font=("Arial", 13),
+                width=28,
+                height=28,
+                fg_color=COLORS["warning"],
+                hover_color=COLORS["danger"],
+                command=lambda s=sale: self.void_sale(s)
+            ).pack(side="left", padx=1)
+        
+        # ลบบิล (แสดงผลชัดเจน 100% ไม่ถูกบังโดย Scrollbar)
+        ctk.CTkButton(
+            btn_frame,
+            text="🗑️",
+            font=("Arial", 13),
+            width=28,
+            height=28,
+            fg_color=COLORS["danger"],
+            command=lambda s_id=sale['sale_id']: self.delete_single_sale(s_id)
+        ).pack(side="left", padx=1)
+
         # เลขที่
         ctk.CTkLabel(
             row,
             text=sale['sale_number'],
             font=FONTS["body"],
-            width=130,
+            width=115,
             text_color="#999" if is_voided else COLORS["text_dark"]
         ).pack(side="left", padx=3)
         
@@ -309,7 +399,7 @@ class SalesHistoryFrame(ctk.CTkFrame):
             row,
             text=time_str,
             font=FONTS["body"],
-            width=110,
+            width=95,
             text_color="#999" if is_voided else COLORS["text_dark"]
         ).pack(side="left", padx=3)
         
@@ -318,7 +408,7 @@ class SalesHistoryFrame(ctk.CTkFrame):
             row,
             text=str(sale['item_count']),
             font=FONTS["body"],
-            width=60,
+            width=45,
             text_color="#999" if is_voided else COLORS["text_dark"]
         ).pack(side="left", padx=3)
         
@@ -327,7 +417,7 @@ class SalesHistoryFrame(ctk.CTkFrame):
             row,
             text=f"฿{sale['subtotal']:,.2f}",
             font=FONTS["body"],
-            width=100,
+            width=80,
             text_color="#999" if is_voided else COLORS["text_dark"]
         ).pack(side="left", padx=3)
         
@@ -336,7 +426,7 @@ class SalesHistoryFrame(ctk.CTkFrame):
             row,
             text=f"฿{sale['discount_amount']:,.2f}",
             font=FONTS["body"],
-            width=80,
+            width=65,
             text_color="#ccc" if is_voided else COLORS["danger"]
         ).pack(side="left", padx=3)
         
@@ -352,7 +442,7 @@ class SalesHistoryFrame(ctk.CTkFrame):
             row,
             text=total_text,
             font=("Sarabun", 13, "bold"),
-            width=110,
+            width=90,
             text_color=total_color
         ).pack(side="left", padx=3)
         
@@ -361,7 +451,7 @@ class SalesHistoryFrame(ctk.CTkFrame):
             row,
             text=sale['cashier_name'] or "-",
             font=FONTS["small"],
-            width=100,
+            width=85,
             text_color="#999" if is_voided else COLORS["text_dark"]
         ).pack(side="left", padx=3)
         
@@ -1031,50 +1121,39 @@ class SalesHistoryFrame(ctk.CTkFrame):
         if not filename:
             return
             
-        try:
-            import openpyxl
-            wb = openpyxl.Workbook()
-            ws = wb.active
-            ws.title = "Sales History"
-            
-            headers = [
-                "เลขที่บิล", "วันที่/เวลา", "สมาชิก", "ยอดรวม", "ส่วนลด", "ภาษี", 
-                "ยอดสุทธิ", "รับเงิน", "เงินทอน", "วิธีชำระ", "สถานะ",
-                "พนักงาน", "รายการสินค้า"
-            ]
-            
-            for col, header in enumerate(headers, 1):
-                cell = ws.cell(1, col, header)
-                cell.font = openpyxl.styles.Font(bold=True, color="FFFFFF")
-                cell.fill = openpyxl.styles.PatternFill(start_color="1F538D", fill_type="solid")
-            
-            for row, sale in enumerate(sales, 2):
-                ws.cell(row, 1, sale['sale_number'])
-                ws.cell(row, 2, sale['sale_date'])
-                ws.cell(row, 3, sale['member_name'] or 'ลูกค้าทั่วไป')
-                ws.cell(row, 4, sale['subtotal'])
-                ws.cell(row, 5, sale['discount_amount'])
-                ws.cell(row, 6, sale['tax_amount'])
-                ws.cell(row, 7, sale['total_amount'])
-                ws.cell(row, 8, sale['paid_amount'])
-                ws.cell(row, 9, sale['change_amount'])
-                ws.cell(row, 10, sale['payment_method'])
-                ws.cell(row, 11, sale['status'])
-                ws.cell(row, 12, sale['cashier_name'])
-                ws.cell(row, 13, sale['items'] or '-')
-                
-            for col_cells in ws.columns:
-                max_length = 0
-                column = col_cells[0].column_letter
-                for cell in col_cells:
-                    try:
-                        if len(str(cell.value)) > max_length:
-                            max_length = len(str(cell.value))
-                    except:
-                        pass
-                ws.column_dimensions[column].width = min(max_length + 2, 50)
-                
-            wb.save(filename)
-            messagebox.showinfo("สำเร็จ", f"Export ประวัติการขายสำเร็จ!\nบันทึกที่: {filename}")
-        except Exception as e:
-            messagebox.showerror("ข้อผิดพลาด", f"ไม่สามารถบันทึกไฟล์ได้: {e}")
+        columns = [
+            "เลขที่บิล", "วันที่/เวลา", "สมาชิก", "ยอดรวม", "ส่วนลด", "ภาษี", 
+            "ยอดสุทธิ", "รับเงิน", "เงินทอน", "วิธีชำระ", "สถานะ",
+            "พนักงาน", "รายการสินค้า"
+        ]
+        
+        export_data = []
+        for sale in sales:
+            export_data.append({
+                "เลขที่บิล": sale['sale_number'],
+                "วันที่/เวลา": sale['sale_date'],
+                "สมาชิก": sale['member_name'] or 'ลูกค้าทั่วไป',
+                "ยอดรวม": sale['subtotal'],
+                "ส่วนลด": sale['discount_amount'],
+                "ภาษี": sale['tax_amount'],
+                "ยอดสุทธิ": sale['total_amount'],
+                "รับเงิน": sale['paid_amount'],
+                "เงินทอน": sale['change_amount'],
+                "วิธีชำระ": sale['payment_method'],
+                "สถานะ": sale['status'],
+                "พนักงาน": sale['cashier_name'],
+                "รายการสินค้า": sale['items'] or '-'
+            })
+        
+        success = ExcelManager.export_to_excel(
+            export_data,
+            columns,
+            filename,
+            sheet_name="Sales History",
+            title=f"รายงานประวัติการขาย ({start} ถึง {end})"
+        )
+        
+        if success:
+            messagebox.showinfo("สำเร็จ", f"Export ประวัติการขายสำเร็จ 100%!\nบันทึกที่: {filename}")
+        else:
+            messagebox.showerror("ข้อผิดพลาด", "ไม่สามารถบันทึกไฟล์ Excel ได้")

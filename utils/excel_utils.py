@@ -11,98 +11,145 @@ from pathlib import Path
 
 
 class ExcelManager:
-    """จัดการการ Import/Export ข้อมูล Excel"""
+    """จัดการการ Import/Export ข้อมูล Excel สำหรับระบบ POS"""
     
+    @staticmethod
+    def get_display_width(val):
+        """คำนวณความกว้างที่เหมาะสมสำหรับอักขระไทยและ Unicode ใน Excel"""
+        if val is None:
+            return 0
+        s = str(val)
+        width = 0.0
+        for char in s:
+            if ord(char) > 127:
+                width += 1.6  # น้ำหนักอักขระไทย / Wide Unicode
+            else:
+                width += 1.05
+        return width
+
     @staticmethod
     def export_to_excel(data, columns, filename, sheet_name="Sheet1", title=None):
         """
-        Export ข้อมูลเป็นไฟล์ Excel
-        
-        Args:
-            data: ข้อมูลแบบ list of dict หรือ list of list
-            columns: ชื่อคอลัมน์
-            filename: ชื่อไฟล์
-            sheet_name: ชื่อ sheet
-            title: หัวข้อรายงาน
-            
-        Returns:
-            True ถ้าสำเร็จ
+        Export ข้อมูลเป็นไฟล์ Excel โดยปรับความกว้างคอลัมน์ให้อัตโนมัติ ฟอนต์ตัวหนังสือไม่ล้นนอกสเกลช่อง 100%
         """
         try:
+            from openpyxl.utils import get_column_letter
+            
             # สร้าง workbook
             wb = Workbook()
             ws = wb.active
             ws.title = sheet_name
             
-            # กำหนดสไตล์
-            header_font = Font(bold=True, color="FFFFFF", size=12)
-            header_fill = PatternFill(start_color="1F538D", end_color="1F538D", fill_type="solid")
-            border = Border(
-                left=Side(style='thin'),
-                right=Side(style='thin'),
-                top=Side(style='thin'),
-                bottom=Side(style='thin')
+            # สไตล์ส่วนต่างๆ
+            title_font = Font(name='Sarabun', size=16, bold=True, color="1E3A8A")
+            date_font = Font(name='Sarabun', size=10, italic=True, color="64748B")
+            
+            header_font = Font(name='Sarabun', size=11, bold=True, color="FFFFFF")
+            header_fill = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+            
+            data_font = Font(name='Sarabun', size=11, color="0F172A")
+            even_row_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+            odd_row_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+            
+            thin_border = Border(
+                left=Side(style='thin', color='CBD5E1'),
+                right=Side(style='thin', color='CBD5E1'),
+                top=Side(style='thin', color='CBD5E1'),
+                bottom=Side(style='thin', color='CBD5E1')
             )
             
-            current_row = 1
+            align_center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            align_left = Alignment(horizontal='left', vertical='center', wrap_text=True)
+            align_right = Alignment(horizontal='right', vertical='center')
             
-            # เพิ่มหัวข้อ
+            current_row = 1
+            num_cols = len(columns)
+            max_col_letter = get_column_letter(num_cols)
+            
+            # เพิ่มหัวข้อรายงาน
             if title:
-                ws.merge_cells(f'A1:{chr(64 + len(columns))}1')
+                ws.merge_cells(f'A1:{max_col_letter}1')
                 title_cell = ws['A1']
                 title_cell.value = title
-                title_cell.font = Font(bold=True, size=16)
-                title_cell.alignment = Alignment(horizontal='center')
+                title_cell.font = title_font
+                title_cell.alignment = align_center
+                ws.row_dimensions[1].height = 32
                 current_row = 2
                 
                 # วันที่สร้างรายงาน
-                ws.merge_cells(f'A2:{chr(64 + len(columns))}2')
+                ws.merge_cells(f'A2:{max_col_letter}2')
                 date_cell = ws['A2']
-                date_cell.value = f"วันที่: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
-                date_cell.alignment = Alignment(horizontal='center')
+                date_cell.value = f"วันที่ออกรายงาน: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
+                date_cell.font = date_font
+                date_cell.alignment = align_center
+                ws.row_dimensions[2].height = 20
                 current_row = 4
             
-            # เพิ่ม header
+            # เพิ่ม Header
+            ws.row_dimensions[current_row].height = 28
             for col_idx, column in enumerate(columns, start=1):
                 cell = ws.cell(row=current_row, column=col_idx)
-                cell.value = column
+                cell.value = str(column)
                 cell.font = header_font
                 cell.fill = header_fill
-                cell.alignment = Alignment(horizontal='center')
-                cell.border = border
+                cell.alignment = align_center
+                cell.border = thin_border
             
-            # เพิ่มข้อมูล
-            for row_data in data:
-                current_row += 1
-                if isinstance(row_data, dict):
-                    # ถ้าเป็น dict ใช้ key ตาม columns
-                    for col_idx, column in enumerate(columns, start=1):
-                        cell = ws.cell(row=current_row, column=col_idx)
-                        cell.value = row_data.get(column, "")
-                        cell.border = border
-                else:
-                    # ถ้าเป็น list
-                    for col_idx, value in enumerate(row_data, start=1):
-                        cell = ws.cell(row=current_row, column=col_idx)
-                        cell.value = value
-                        cell.border = border
+            # เพิ่ม ข้อมูล (Data rows)
+            data_start_row = current_row + 1
+            for row_offset, row_data in enumerate(data):
+                r_idx = data_start_row + row_offset
+                ws.row_dimensions[r_idx].height = 24
+                row_fill = even_row_fill if row_offset % 2 == 0 else odd_row_fill
+                
+                for col_idx, column_key in enumerate(columns, start=1):
+                    cell = ws.cell(row=r_idx, column=col_idx)
+                    
+                    if isinstance(row_data, dict):
+                        val = row_data.get(column_key, "")
+                    else:
+                        val = row_data[col_idx - 1] if col_idx <= len(row_data) else ""
+                    
+                    cell.value = val
+                    cell.font = data_font
+                    cell.fill = row_fill
+                    cell.border = thin_border
+                    
+                    # Formatting & Alignment ตามประเภทข้อมูล
+                    if isinstance(val, (int, float)):
+                        cell.alignment = align_right
+                        if isinstance(val, float) or (isinstance(val, int) and any(kw in str(column_key).lower() for kw in ['ราคา', 'ยอด', 'ส่วนลด', 'ภาษี', 'บาท', 'total', 'subtotal', 'price', 'discount', 'amount'])):
+                            cell.number_format = '#,##0.00'
+                        else:
+                            cell.number_format = '#,##0'
+                    else:
+                        str_val = str(val).strip()
+                        # จัดกึ่งกลางสำหรับ วันที่/เวลา, รหัส, สถานะ, บาร์โค้ด, เบอร์โทร
+                        if any(kw in str(column_key) for kw in ['วันที่', 'เวลา', 'เลขที่', 'รหัส', 'บาร์โค้ด', 'สถานะ', 'หน่วย', 'วิธีชำระ', 'date', 'status']):
+                            cell.alignment = align_center
+                        else:
+                            cell.alignment = align_left
             
-            # ปรับความกว้างคอลัมน์
-            from openpyxl.utils import get_column_letter
-            for column in ws.columns:
-                max_length = 0
-                column_letter = get_column_letter(column[0].column)
-                for cell in column:
-                    try:
-                        if len(str(cell.value)) > max_length:
-                            max_length = len(cell.value)
-                    except:
-                        pass
-                adjusted_width = min(max_length + 2, 50)
-                ws.column_dimensions[column_letter].width = adjusted_width
+            # ปรับความกว้างคอลัมน์ให้อัตโนมัติ (Auto-fit Width with Thai Unicode weighting)
+            for col_idx in range(1, num_cols + 1):
+                col_letter = get_column_letter(col_idx)
+                max_width = 0.0
+                
+                for cell in ws[col_letter]:
+                    w = ExcelManager.get_display_width(cell.value)
+                    if w > max_width:
+                        max_width = w
+                
+                # เพิ่ม Safety padding 6 ช่อง และกำหนดความกว้างขั้นต่ำ 16 สูงสุด 70
+                final_width = max(max_width + 6.0, 16.0)
+                final_width = min(final_width, 70.0)
+                ws.column_dimensions[col_letter].width = final_width
             
-            # บันทึกไฟล์
-            wb.save(filename)
+            # สร้างโฟลเดอร์สำหรับบันทึกหากยังไม่มี
+            file_path = Path(filename)
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            wb.save(str(file_path))
             return True
             
         except Exception as e:

@@ -65,28 +65,29 @@ def run_pyinstaller_builds():
     print("  [SUCCESS] KeyGen Build Completed Successfully!")
 
 def prepare_and_clear_deploy_dir():
-    """เคลียร์โฟลเดอร์ปลายทาง STDeploy"""
-    print(f"[5/6] Clearing target deploy directory ({TARGET_DEPLOY_DIR})...")
-    if TARGET_DEPLOY_DIR.exists():
-        for item in TARGET_DEPLOY_DIR.iterdir():
-            try:
-                if item.is_dir():
-                    shutil.rmtree(item)
-                else:
-                    item.unlink()
-            except Exception as e:
-                print(f"  - Retrying force delete for {item.name}: {e}")
-                time.sleep(0.5)
-                if item.is_dir():
-                    shutil.rmtree(item, ignore_errors=True)
-                else:
-                    try:
+    """เคลียร์โฟลเดอร์ปลายทาง STDeploy และ StorePOS_v1.0.0"""
+    for d in [TARGET_DEPLOY_DIR, ALT_DEPLOY_DIR]:
+        print(f"[5/6] Clearing target deploy directory ({d})...")
+        if d.exists():
+            for item in d.iterdir():
+                try:
+                    if item.is_dir():
+                        shutil.rmtree(item)
+                    else:
                         item.unlink()
-                    except Exception:
-                        pass
-    else:
-        TARGET_DEPLOY_DIR.mkdir(parents=True, exist_ok=True)
-    print("  [SUCCESS] Target deploy directory cleared!")
+                except Exception as e:
+                    print(f"  - Retrying force delete for {item.name}: {e}")
+                    time.sleep(0.5)
+                    if item.is_dir():
+                        shutil.rmtree(item, ignore_errors=True)
+                    else:
+                        try:
+                            item.unlink()
+                        except Exception:
+                            pass
+        else:
+            d.mkdir(parents=True, exist_ok=True)
+        print(f"  [SUCCESS] Target deploy directory cleared: {d}")
 
 def deploy_package(src_dist_dir, dest_package_dir):
     """คัดลอกไฟล์ Build และสร้างโครงสร้างโฟลเดอร์ประกอบสำหรับแต่ละแพ็คเกจ"""
@@ -134,44 +135,40 @@ def deploy_package(src_dist_dir, dest_package_dir):
                         print(f"  - Warning copying {img_file.name}: {e_copy}")
 
 def deploy_all_packages():
-    """คัดลอกไฟล์ Build ทั้ง 3 ส่วน (StorePOS_Full, StorePOS_30DayTrial, Tools) ไปยัง STDeploy"""
-    print(f"[6/6] Deploying all packages to {TARGET_DEPLOY_DIR}...")
-    
-    # 1. Deploy StorePOS_Full
-    dest_full = TARGET_DEPLOY_DIR / "StorePOS_Full"
-    print(f"  - Deploying Full version to {dest_full.name}...")
-    deploy_package(DIST_FULL, dest_full)
+    """คัดลอกไฟล์ Build ทั้งหมดไปยังทั้ง StorePOS_v1.0.0 และ STDeploy"""
+    for target in [TARGET_DEPLOY_DIR, ALT_DEPLOY_DIR]:
+        print(f"[6/6] Deploying all packages to {target}...")
+        
+        # 1. Deploy StorePOS_Full
+        dest_full = target / "StorePOS_Full"
+        print(f"  - Deploying Full version to {dest_full.name}...")
+        deploy_package(DIST_FULL, dest_full)
 
-    # 2. Deploy StorePOS_30DayTrial (Skipped per user preference)
-    # dest_trial = TARGET_DEPLOY_DIR / "StorePOS_30DayTrial"
-    # print(f"  - Deploying 30-Day Trial version to {dest_trial.name}...")
-    # deploy_package(DIST_TRIAL30, dest_trial)
+        # 2. Deploy Tools
+        dest_tools = target / "Tools"
+        dest_tools.mkdir(parents=True, exist_ok=True)
+        print(f"  - Deploying KeyGen compiled executable to {dest_tools.name}...")
+        if DIST_KEYGEN.exists():
+            for item in DIST_KEYGEN.iterdir():
+                dest_item = dest_tools / item.name
+                if item.is_dir():
+                    shutil.copytree(item, dest_item)
+                else:
+                    shutil.copy2(item, dest_item)
 
-    # 3. Deploy Tools
-    dest_tools = TARGET_DEPLOY_DIR / "Tools"
-    dest_tools.mkdir(parents=True, exist_ok=True)
-    print(f"  - Deploying KeyGen compiled executable to {dest_tools.name}...")
-    if DIST_KEYGEN.exists():
-        for item in DIST_KEYGEN.iterdir():
-            dest_item = dest_tools / item.name
-            if item.is_dir():
-                shutil.copytree(item, dest_item)
-            else:
-                shutil.copy2(item, dest_item)
+        # คัดลอกไฟล์สคริปต์แอดมินเพิ่มเติมลงใน Tools
+        admin_scripts = [
+            BASE_DIR / "keygen_standalone.py",
+            BASE_DIR / "tools" / "keygen_standalone.py",
+            BASE_DIR / "tools" / "license_generator.py",
+            BASE_DIR / "tools" / "license_manager.py"
+        ]
+        for script_path in admin_scripts:
+            if script_path.exists():
+                shutil.copy2(script_path, dest_tools / script_path.name)
+                print(f"  - Copied admin script: {script_path.name} to Tools")
 
-    # คัดลอกไฟล์สคริปต์แอดมินเพิ่มเติมลงใน Tools
-    admin_scripts = [
-        BASE_DIR / "keygen_standalone.py",
-        BASE_DIR / "tools" / "keygen_standalone.py",
-        BASE_DIR / "tools" / "license_generator.py",
-        BASE_DIR / "tools" / "license_manager.py"
-    ]
-    for script_path in admin_scripts:
-        if script_path.exists():
-            shutil.copy2(script_path, dest_tools / script_path.name)
-            print(f"  - Copied admin script: {script_path.name} to Tools")
-
-    print("  [SUCCESS] All 3 packages deployed successfully!")
+    print("  [SUCCESS] All packages deployed to StorePOS_v1.0.0 & STDeploy successfully!")
 
 def verify_deployment():
     """ตรวจสอบความถูกต้องของการ Deploy ทั้ง 3 ส่วน"""

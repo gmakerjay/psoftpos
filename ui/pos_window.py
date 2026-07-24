@@ -63,11 +63,14 @@ class POSFrame(ctk.CTkFrame):
         main_container.pack(fill="both", expand=True)
         
         left_frame = ctk.CTkFrame(main_container, fg_color="transparent")
-        left_frame.pack(side="left", fill="both", expand=True, padx=(20, 10), pady=(10, 20))
+        right_frame = ctk.CTkFrame(main_container, fg_color="white", corner_radius=15)
         
-        right_frame = ctk.CTkFrame(main_container, fg_color="white", corner_radius=15, width=450)
-        right_frame.pack(side="right", fill="y", padx=(10, 20), pady=(10, 20))
-        right_frame.pack_propagate(False)
+        main_container.columnconfigure(0, weight=6)  # 60% สำหรับสินค้า
+        main_container.columnconfigure(1, weight=4)  # 40% สำหรับตะกร้าสินค้า
+        main_container.rowconfigure(0, weight=1)
+        
+        left_frame.grid(row=0, column=0, sticky="nsew", padx=(10, 5), pady=(5, 10))
+        right_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 10), pady=(5, 10))
         
         self.create_left_panel(left_frame)
         self.create_right_panel(right_frame)
@@ -595,7 +598,7 @@ class POSFrame(ctk.CTkFrame):
             btn_frame,
             text="💰 ชำระเงิน (F10)",
             font=("Sarabun", 16, "bold"),
-            height=48,
+            height=42,
             fg_color=COLORS["success"],
             hover_color="#45a049",
             command=self.show_checkout_dialog
@@ -655,17 +658,23 @@ class POSFrame(ctk.CTkFrame):
             print(f"Error loading members in POS: {e}")
             
     def search_member_pos(self, event=None):
-        """ค้นหาสมาชิกด้วยชื่อหรือเบอร์โทรในหน้า POS"""
+        """ค้นหาสมาชิกด้วยชื่อหรือเบอร์โทรในหน้า POS (รองรับทั้งชื่อ, เบอร์โทรมี/ไม่มีขีด)"""
         query = self.member_search_entry.get().strip()
         if not query:
             self.load_members_dropdown()
             return
             
+        clean_query = query.replace("-", "").strip()
         try:
             self.db.connect()
             members = self.db.fetch_all(
-                "SELECT member_id, name, phone FROM members WHERE name LIKE ? OR phone LIKE ? ORDER BY name",
-                (f"%{query}%", f"%{query}%")
+                """SELECT member_id, name, phone 
+                   FROM members 
+                   WHERE LOWER(name) LIKE ? 
+                      OR REPLACE(phone, '-', '') LIKE ? 
+                      OR phone LIKE ? 
+                   ORDER BY name""",
+                (f"%{query.lower()}%", f"%{clean_query}%", f"%{query}%")
             )
             self.db.disconnect()
             
@@ -762,56 +771,48 @@ class POSFrame(ctk.CTkFrame):
             print(f"Error applying member discount in POS: {e}")
             
     def create_product_card(self, product):
-        """สร้างการ์ดสินค้า"""
-        card = ctk.CTkFrame(self.products_list, fg_color=COLORS["light"], corner_radius=10)
-        card.pack(fill="x", padx=5, pady=5)
+        """สร้างการ์ดสินค้าแบบกระทัดรัด (Compact Height)"""
+        card = ctk.CTkFrame(self.products_list, fg_color=COLORS["light"], corner_radius=8)
+        card.pack(fill="x", padx=4, pady=3)
         
-        # ชื่อและราคา
-        info_frame = ctk.CTkFrame(card, fg_color="transparent")
-        info_frame.pack(side="left", fill="both", expand=True, padx=15, pady=10)
-        
-        name_label = ctk.CTkLabel(
-            info_frame,
-            text=product['product_name'],
-            font=FONTS["body"],
-            anchor="w"
-        )
-        name_label.pack(fill="x")
-        
-        # แสดงราคาตามประเภทที่เลือก
-        price_type = self.price_type_var.get()
-        price = product[f'{price_type}_price']
-        
-        price_label = ctk.CTkLabel(
-            info_frame,
-            text=f"฿{price:,.2f}",
-            font=("Sarabun", 16, "bold"),
-            text_color=COLORS["success"],
-            anchor="w"
-        )
-        price_label.pack(fill="x")
-        
-        stock_label = ctk.CTkLabel(
-            info_frame,
-            text=f"คงเหลือ: {product['stock_quantity']} ชิ้น",
-            font=FONTS["small"],
-            text_color=COLORS["text_light"],
-            anchor="w"
-        )
-        stock_label.pack(fill="x")
-        
-        # ปุ่มเพิ่มในตะกร้า
+        # ปุ่มเพิ่มในตะกร้าชิดขวา
         add_btn = ctk.CTkButton(
             card,
             text="➕",
-            font=("Arial", 20),
-            width=50,
-            height=50,
+            font=("Arial", 15, "bold"),
+            width=36,
+            height=34,
             fg_color=COLORS["primary"],
             hover_color=COLORS["secondary"],
             command=lambda p=product: self.add_to_cart(p)
         )
-        add_btn.pack(side="right", padx=10, pady=10)
+        add_btn.pack(side="right", padx=8, pady=4)
+
+        # ชื่อและราคาในฝั่งซ้าย
+        info_frame = ctk.CTkFrame(card, fg_color="transparent")
+        info_frame.pack(side="left", fill="both", expand=True, padx=10, pady=3)
+        
+        name_label = ctk.CTkLabel(
+            info_frame,
+            text=product['product_name'],
+            font=("Sarabun", 13, "bold"),
+            text_color=COLORS["text_dark"],
+            anchor="w"
+        )
+        name_label.pack(fill="x")
+        
+        # แสดงราคาและคงเหลือแบบแนวนอนกระทัดรัด
+        price_type = self.price_type_var.get()
+        price = product[f'{price_type}_price']
+        
+        sub_info_label = ctk.CTkLabel(
+            info_frame,
+            text=f"฿{price:,.2f}  |  คงเหลือ: {product['stock_quantity']} ชิ้น",
+            font=("Sarabun", 12),
+            text_color=COLORS["success"],
+            anchor="w"
+        )
+        sub_info_label.pack(fill="x")
     
     def search_product(self, event=None):
         """ค้นหาสินค้า - Optimized with caching"""
@@ -960,7 +961,7 @@ class POSFrame(ctk.CTkFrame):
         self.update_customer_display()  # อัพเดทจอลูกค้า
     
     def update_cart_display(self):
-        """อัพเดทการแสดงผลตะกร้า"""
+        """อัพเดทการแสดงผลตะกร้าสินค้าแบบ Ultra-Compact (เลื่อนดูให้น้อยที่สุด)"""
         # ล้างรายการเดิม
         for widget in self.cart_list.winfo_children():
             widget.destroy()
@@ -974,81 +975,93 @@ class POSFrame(ctk.CTkFrame):
             ).pack(pady=30)
             return
         
-        # แสดงรายการ
+        # แสดงรายการแบบ Compact 1 บรรทัด (Single-line row height ~36px)
         for idx, item in enumerate(self.cart_items):
+            bg_pastel = "#F0F4FF" if idx % 2 == 0 else "#EFF6FF"
+            border_pastel = "#CBD5E1"
+            
             item_frame = ctk.CTkFrame(
                 self.cart_list,
-                fg_color="white",
-                corner_radius=8
+                fg_color=bg_pastel,
+                corner_radius=8,
+                border_width=1,
+                border_color=border_pastel,
+                height=36
             )
-            item_frame.pack(fill="x", padx=5, pady=5)
+            item_frame.pack(fill="x", padx=4, pady=2)
+            item_frame.pack_propagate(False)
             
-            # ชื่อสินค้า
-            name_label = ctk.CTkLabel(
+            # ปุ่มลบชิดขวาสุด
+            delete_btn = ctk.CTkButton(
                 item_frame,
-                text=item['product_name'],
-                font=FONTS["body"],
-                anchor="w"
-            )
-            name_label.pack(fill="x", padx=10, pady=(10, 5))
-            
-            # จำนวนและราคา
-            detail_frame = ctk.CTkFrame(item_frame, fg_color="transparent")
-            detail_frame.pack(fill="x", padx=10, pady=(0, 10))
-            
-            # ปุ่มลด
-            minus_btn = ctk.CTkButton(
-                detail_frame,
-                text="-",
-                width=30,
-                height=30,
-                font=("Arial", 16, "bold"),
+                text="🗑️",
+                width=26,
+                height=26,
+                font=("Arial", 12),
                 fg_color=COLORS["danger"],
-                command=lambda i=idx: self.decrease_quantity(i)
+                hover_color="#DC2626",
+                command=lambda i=idx: self.remove_from_cart(i)
             )
-            minus_btn.pack(side="left", padx=2)
-            
-            # จำนวน
-            qty_label = ctk.CTkLabel(
-                detail_frame,
-                text=str(item['quantity']),
-                font=FONTS["body"],
-                width=40
+            delete_btn.pack(side="right", padx=(2, 6), pady=4)
+
+            # ราคารวม
+            total_label = ctk.CTkLabel(
+                item_frame,
+                text=f"฿{item['total']:,.2f}",
+                font=("Sarabun", 13, "bold"),
+                text_color="#059669",
+                width=75,
+                anchor="e"
             )
-            qty_label.pack(side="left", padx=5)
-            
-            # ปุ่มเพิ่ม
+            total_label.pack(side="right", padx=(2, 4), pady=4)
+
+            # ปุ่มเพิ่ม (+)
             plus_btn = ctk.CTkButton(
-                detail_frame,
+                item_frame,
                 text="+",
-                width=30,
-                height=30,
-                font=("Arial", 16, "bold"),
+                width=24,
+                height=24,
+                font=("Arial", 14, "bold"),
                 fg_color=COLORS["success"],
                 command=lambda i=idx: self.increase_quantity(i)
             )
-            plus_btn.pack(side="left", padx=2)
-            
-            # ราคารวม
-            total_label = ctk.CTkLabel(
-                detail_frame,
-                text=f"฿{item['total']:,.2f}",
-                font=("Sarabun", 16, "bold"),
-                text_color=COLORS["success"]
+            plus_btn.pack(side="right", padx=1, pady=5)
+
+            # จำนวน
+            qty_label = ctk.CTkLabel(
+                item_frame,
+                text=str(item['quantity']),
+                font=("Sarabun", 13, "bold"),
+                text_color="#0369A1",
+                width=28,
+                anchor="center"
             )
-            total_label.pack(side="right")
-            
-            # ปุ่มลบ
-            delete_btn = ctk.CTkButton(
-                detail_frame,
-                text="🗑️",
-                width=30,
-                height=30,
-                font=("Arial", 14),
+            qty_label.pack(side="right", padx=1, pady=4)
+
+            # ปุ่มลด (-)
+            minus_btn = ctk.CTkButton(
+                item_frame,
+                text="-",
+                width=24,
+                height=24,
+                font=("Arial", 14, "bold"),
                 fg_color=COLORS["danger"],
-                command=lambda i=idx: self.remove_from_cart(i)
+                command=lambda i=idx: self.decrease_quantity(i)
             )
-            delete_btn.pack(side="right", padx=5)
+            minus_btn.pack(side="right", padx=1, pady=5)
+
+            # ชื่อสินค้า (ยืดหยุ่นทางซ้าย และแสดงชื่อสินค้าได้ยาวขึ้นเป็น 35 อักขระ)
+            raw_name = item['product_name']
+            display_name = raw_name if len(raw_name) <= 35 else raw_name[:35] + "..."
+            
+            name_label = ctk.CTkLabel(
+                item_frame,
+                text=display_name,
+                font=("Sarabun", 13, "bold"),
+                text_color="#0F172A",
+                anchor="w"
+            )
+            name_label.pack(side="left", fill="x", expand=True, padx=(8, 4), pady=4)
     
     def increase_quantity(self, index):
         """เพิ่มจำนวนสินค้า"""

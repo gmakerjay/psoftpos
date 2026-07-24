@@ -26,8 +26,9 @@ class PrinterManager:
         self.paper_size = "58mm"       # A4, A5, 80mm, 58mm, label
         self.printer_name = "XP-58"    # ชื่อเครื่องพิมพ์
         self.printer_codepage = "18"   # รหัสภาษาไทยเครื่องพิมพ์
+        self.printer_feed_lines = 8    # จำนวนบรรทัดส่งกระดาษก่อนตัด (เพิ่มระยะขอบสวยงาม ไม่ชิดเป๊ะเกินไป)
         self.load_settings()
-    
+
     def log_debug(self, message):
         """บันทึก log การทำงานเพื่อ Debug"""
         try:
@@ -47,12 +48,18 @@ class PrinterManager:
             paper_size = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key = 'paper_size'")
             printer_name = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key = 'printer_name'")
             printer_codepage = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key = 'printer_codepage'")
+            feed_lines = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key = 'printer_feed_lines'")
             db.disconnect()
             
             if printer_type: self.printer_type = printer_type['setting_value']
             if paper_size: self.paper_size = paper_size['setting_value']
             if printer_name: self.printer_name = printer_name['setting_value']
             if printer_codepage: self.printer_codepage = printer_codepage['setting_value']
+            if feed_lines:
+                try:
+                    self.printer_feed_lines = int(feed_lines['setting_value'].split()[0])
+                except Exception:
+                    pass
         except Exception as e:
             self.log_debug(f"Error loading settings: {e}")
     
@@ -236,8 +243,8 @@ class PrinterManager:
             qty = item.get('quantity', 0)
             price = item.get('unit_price', 0)
             total = item.get('total_price', 0)
-            detail = f"  {qty} x {price:,.0f}"
-            total_str = f"{total:,.0f}"
+            detail = f"  {qty} x {price:,.2f}"
+            total_str = f"{total:,.2f}"
             add_lr(detail, total_str)
         
         add_separator()
@@ -293,11 +300,14 @@ class PrinterManager:
                 total_height += line_h // 2
             elif op_type == 'sep':
                 total_height += line_h
+            elif op_type == 'image':
+                img_w, img_h = text.size
+                total_height += img_h
             elif f == font_bold:
                 total_height += bold_h
             else:
                 total_height += line_h
-        total_height += 15  # bottom padding
+        total_height += 100  # bottom padding (เพิ่มระยะเผื่อขอบล่างให้กระดาษส่งพ้นใบมีดตัดแบบสวยงาม)
         
         # === วาดภาพ ===
         img = Image.new('1', (paper_width, total_height), 1)  # 1 = white
@@ -384,11 +394,12 @@ class PrinterManager:
     def generate_bitmap_receipt(self, receipt_data):
         """สร้างคำสั่ง ESC/POS แบบ Bitmap สำหรับใบเสร็จ (รองรับภาษาไทย 100%)"""
         GS = b'\x1d'
+        ESC = b'\x1b'
         
         commands = bytearray()
         
         # Initialize printer
-        commands += b'\x1b\x40'  # ESC @
+        commands += ESC + b'@'  # ESC @
         
         # Render ใบเสร็จเป็นรูปภาพ
         img = self._render_receipt_image(receipt_data)
@@ -397,9 +408,10 @@ class PrinterManager:
         # แปลงเป็น raster commands
         commands += self._image_to_escpos_raster(img)
         
-        # Feed + Cut
-        commands += b'\n\n\n'
-        commands += GS + b'V\x00'  # Full cut
+        # Feed + Cut (ส่งกระดาษพ้นหัวตัดก่อนสั่งตัด 8 บรรทัด ให้มีระยะขอบสวยงามไม่ชิดเป๊ะเกินไป)
+        feed_lines = max(5, int(getattr(self, 'printer_feed_lines', 8)))
+        commands += ESC + b'd' + bytes([feed_lines])  # ESC d n (Feed n lines)
+        commands += GS + b'V\x42\x00'                 # GS V 66 0 (Feed and full cut)
         
         return bytes(commands)
 

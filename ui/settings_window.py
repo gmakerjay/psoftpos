@@ -664,6 +664,35 @@ class SettingsFrame(ctk.CTkFrame):
         )
         codepage_combo.pack(side="left")
         
+        # ระยะส่งกระดาษก่อนตัด (Feed Lines)
+        feed_frame = ctk.CTkFrame(content, fg_color=COLORS["light"], corner_radius=10)
+        feed_frame.pack(fill="x", padx=20, pady=(0, 20))
+        
+        ctk.CTkLabel(
+            feed_frame,
+            text="✂️ ระยะส่งกระดาษก่อนตัด (Feed Lines ก่อนใบมีดตัด)",
+            font=FONTS["heading"],
+            text_color=COLORS["primary"]
+        ).pack(padx=20, pady=(20, 10))
+        
+        feed_row = ctk.CTkFrame(feed_frame, fg_color="transparent")
+        feed_row.pack(fill="x", padx=20, pady=(0, 20))
+        
+        self.printer_feed_lines_var = ctk.StringVar(value="6 บรรทัด (มาตรฐาน SENOR GTP-180 / Xprinter)")
+        feed_combo = ctk.CTkComboBox(
+            feed_row,
+            values=[
+                "4 บรรทัด (เครื่องตัดชิด)",
+                "6 บรรทัด (มาตรฐาน SENOR GTP-180 / Xprinter)",
+                "8 บรรทัด (สำหรับเครื่องใบมีดตัดสูง)",
+                "10 บรรทัด (ระยะตัดเผื่อพิเศษ)"
+            ],
+            variable=self.printer_feed_lines_var,
+            width=350,
+            font=FONTS["body"]
+        )
+        feed_combo.pack(side="left")
+        
         # โหลดเครื่องพิมพ์ตอน init
         self.load_available_printers()
         
@@ -1034,6 +1063,9 @@ class SettingsFrame(ctk.CTkFrame):
 
         if 'printer_codepage' in self.settings_dict:
             self.printer_codepage_var.set(self.settings_dict['printer_codepage'])
+
+        if 'printer_feed_lines' in self.settings_dict:
+            self.printer_feed_lines_var.set(self.settings_dict['printer_feed_lines'])
     
     def save_company_info(self):
         """บันทึกข้อมูลร้าน"""
@@ -1152,6 +1184,7 @@ class SettingsFrame(ctk.CTkFrame):
             'printer_name': self.printer_name_var.get(),
             'paper_size': self.paper_size_var.get(),
             'printer_codepage': self.printer_codepage_var.get(),
+            'printer_feed_lines': self.printer_feed_lines_var.get(),
         }
         
         self.db.connect()
