@@ -154,7 +154,7 @@ class SalesHistoryFrame(ctk.CTkFrame):
             ("พนักงาน", 100),
             ("สถานะ", 100),
             ("รายการสินค้า", 220),
-            ("จัดการ", 200)
+            ("จัดการ", 240)
         ]
         
         for header, width in headers:
@@ -392,7 +392,7 @@ class SalesHistoryFrame(ctk.CTkFrame):
         ).pack(side="left", padx=3)
         
         # ปุ่มจัดการ
-        btn_frame = ctk.CTkFrame(row, fg_color="transparent", width=200)
+        btn_frame = ctk.CTkFrame(row, fg_color="transparent", width=240)
         btn_frame.pack(side="left", padx=3)
         btn_frame.pack_propagate(False)
         
@@ -427,6 +427,17 @@ class SalesHistoryFrame(ctk.CTkFrame):
             height=30,
             fg_color="#6366f1",
             command=lambda s=sale: self.export_sale_to_pdf(s)
+        ).pack(side="left", padx=1)
+        
+        # พิมพ์บิล A4 เต็มรูป
+        ctk.CTkButton(
+            btn_frame,
+            text="📄 A4",
+            font=("Sarabun", 11, "bold"),
+            width=40,
+            height=30,
+            fg_color="#10B981",
+            command=lambda s=sale: self.open_a4_invoice_dialog(s)
         ).pack(side="left", padx=1)
         
         # ยกเลิกบิล (เฉพาะบิลที่ completed เท่านั้น)
@@ -545,7 +556,7 @@ class SalesHistoryFrame(ctk.CTkFrame):
             dialog = ctk.CTkToplevel(self)
 
         dialog.title(f"รายละเอียด - {sale.get('sale_number', '')}")
-        dialog.geometry("720x650")
+        dialog.geometry(get_responsive_dialog_geometry(self, 720, 620))
         
         try:
             dialog.transient(dialog.master)
@@ -775,6 +786,193 @@ class SalesHistoryFrame(ctk.CTkFrame):
                 messagebox.showerror("ข้อผิดพลาด", "ไม่สามารถสร้างไฟล์ PDF ได้")
         except Exception as e:
             messagebox.showerror("ข้อผิดพลาด", f"เกิดข้อผิดพลาดในการสร้าง PDF:\n{e}")
+
+    def open_a4_invoice_dialog(self, sale):
+        """เปิด Dialog เพื่อแก้ไขหัวกระดาษและพิมพ์ใบเสร็จ/ใบกำกับภาษี A4 เต็มรูปแบบ"""
+        sale = dict(sale) if hasattr(sale, 'keys') else sale
+        sale_id = sale['sale_id']
+        
+        # ค้นหารายละเอียดล่าสุดจากฐานข้อมูลโดยตรง
+        self.db.connect()
+        sale_details = self.db.fetch_one("SELECT * FROM sales WHERE sale_id = ?", (sale_id,))
+        self.db.disconnect()
+        
+        if not sale_details:
+            messagebox.showerror("ข้อผิดพลาด", "ไม่พบข้อมูลบิลการขาย")
+            return
+            
+        sale_details = dict(sale_details)
+        
+        # ดึงค่าเดิม
+        current_name = sale_details.get('customer_name') or ''
+        current_tax_id = sale_details.get('customer_tax_id') or ''
+        current_address = sale_details.get('customer_address') or ''
+        current_notes = sale_details.get('notes') or ''
+        
+        # ถ้าไม่มีชื่อลูกค้าในบิล แต่อาจดึงจากสมาชิก (ถ้ามี)
+        if not current_name and sale_details.get('member_id'):
+            try:
+                self.db.connect()
+                member = self.db.fetch_one("SELECT name, tax_id, address FROM members WHERE member_id = ?", (sale_details['member_id'],))
+                self.db.disconnect()
+                if member:
+                    current_name = member['name'] or ''
+                    current_tax_id = member['tax_id'] or ''
+                    current_address = member['address'] or ''
+            except:
+                pass
+        
+        # สร้าง Toplevel window
+        try:
+            parent_win = self.winfo_toplevel()
+            dialog = ctk.CTkToplevel(parent_win)
+        except Exception:
+            dialog = ctk.CTkToplevel(self)
+            
+        dialog.title(f"ใบเสร็จ A4 / ใบกำกับภาษีเต็มรูป - บิล {sale_details.get('sale_number')}")
+        dialog.geometry(get_responsive_dialog_geometry(self, 560, 560))
+        
+        try:
+            dialog.transient(dialog.master)
+        except Exception:
+            pass
+            
+        dialog.lift()
+        dialog.focus_force()
+        try:
+            dialog.grab_set()
+        except Exception:
+            pass
+            
+        # UI Elements
+        container = ctk.CTkFrame(dialog, fg_color="white", corner_radius=12)
+        container.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        ctk.CTkLabel(
+            container,
+            text=f"📝 แก้ไขหัวเอกสาร & หมายเหตุ (บิล: {sale_details.get('sale_number')})",
+            font=("Sarabun", 16, "bold"),
+            text_color=COLORS["primary"]
+        ).pack(anchor="w", padx=20, pady=(15, 10))
+        
+        # ช่องชื่อลูกค้า/บริษัท
+        ctk.CTkLabel(container, text="ชื่อลูกค้า / บริษัท / ห้างร้าน:", font=FONTS["body"]).pack(anchor="w", padx=20, pady=(5, 2))
+        name_entry = ctk.CTkEntry(container, font=FONTS["body"], height=35)
+        name_entry.pack(fill="x", padx=20, pady=(0, 8))
+        name_entry.insert(0, current_name)
+        
+        # ช่องเลขผู้เสียภาษี
+        ctk.CTkLabel(container, text="เลขประจำตัวผู้เสียภาษี (13 หลัก):", font=FONTS["body"]).pack(anchor="w", padx=20, pady=(5, 2))
+        tax_entry = ctk.CTkEntry(container, font=FONTS["body"], height=35)
+        tax_entry.pack(fill="x", padx=20, pady=(0, 8))
+        tax_entry.insert(0, current_tax_id)
+        
+        # ที่อยู่ลูกค้า
+        ctk.CTkLabel(container, text="ที่อยู่จัดส่ง / ที่อยู่บริษัท:", font=FONTS["body"]).pack(anchor="w", padx=20, pady=(5, 2))
+        address_textbox = ctk.CTkTextbox(container, font=FONTS["body"], height=60, border_width=1, border_color="#CBD5E1")
+        address_textbox.pack(fill="x", padx=20, pady=(0, 8))
+        address_textbox.insert("1.0", current_address)
+
+        # หมายเหตุเพิ่มเติม
+        ctk.CTkLabel(container, text="หมายเหตุเพิ่มเติม (ถ้าไม่ระบุจะใช้ข้อความเดิม):", font=FONTS["body"]).pack(anchor="w", padx=20, pady=(5, 2))
+        note_entry = ctk.CTkEntry(container, font=FONTS["body"], height=35, placeholder_text="ระบุหมายเหตุเพิ่มเติม...")
+        note_entry.pack(fill="x", padx=20, pady=(0, 15))
+        note_entry.insert(0, current_notes)
+        
+        # ฟังก์ชันเมื่อกดบันทึก
+        def do_save_and_print():
+            new_name = name_entry.get().strip()
+            new_tax_id = tax_entry.get().strip()
+            new_address = address_textbox.get("1.0", "end-1c").strip()
+            new_notes = note_entry.get().strip()
+            
+            # บันทึกลงฐานข้อมูล
+            self.db.connect()
+            success = self.db.execute(
+                "UPDATE sales SET customer_name = ?, customer_tax_id = ?, customer_address = ?, notes = ? WHERE sale_id = ?",
+                (new_name, new_tax_id, new_address, new_notes, sale_id)
+            )
+            self.db.disconnect()
+            
+            if not success:
+                messagebox.showerror("ผิดพลาด", "ไม่สามารถบันทึกข้อมูลลงฐานข้อมูลได้")
+                return
+                
+            # สร้างข้อมูล PDF
+            # ดึงรายการสินค้า
+            self.db.connect()
+            items = self.db.fetch_all("""
+                SELECT si.*, p.barcode, p.unit 
+                FROM sale_items si 
+                LEFT JOIN products p ON si.product_id = p.product_id 
+                WHERE si.sale_id = ?
+            """, (sale_id,))
+            self.db.disconnect()
+            
+            # สรุปข้อมูลบริษัท
+            receipt_data = {
+                'company': COMPANY_INFO,
+                'sale_number': sale_details.get('sale_number'),
+                'sale_date': sale_details.get('sale_date'),
+                'customer_name': new_name or 'ลูกค้าทั่วไป',
+                'customer_tax_id': new_tax_id,
+                'customer_address': new_address,
+                'note': new_notes,
+                'notes': new_notes,
+                'cashier': sale.get('cashier_name') or sale_details.get('cashier_name') or '-',
+                'payment_method': sale_details.get('payment_method', 'เงินสด'),
+                'items': [dict(item) for item in items],
+                'subtotal': sale_details.get('subtotal', 0.0),
+                'discount_amount': sale_details.get('discount_amount', 0.0),
+                'tax_amount': sale_details.get('tax_amount', 0.0),
+                'total_amount': sale_details.get('total_amount', 0.0),
+                'paid_amount': sale_details.get('paid_amount', 0.0),
+                'change_amount': sale_details.get('change_amount', 0.0)
+            }
+            
+            # ปิด dialog ก่อน
+            dialog.destroy()
+            
+            # สร้าง PDF
+            try:
+                from utils.pdf_utils import create_full_receipt_a4
+                ok, pdf_file = create_full_receipt_a4(receipt_data)
+                if ok:
+                    messagebox.showinfo("สำเร็จ", f"บันทึกและสร้าง PDF ใบเสร็จ A4 สำเร็จ!\n\nเปิดไฟล์: {pdf_file}")
+                    # เปิดไฟล์ PDF ทันที
+                    import os
+                    os.startfile(os.path.abspath(pdf_file))
+                else:
+                    messagebox.showerror("ผิดพลาด", f"ไม่สามารถสร้าง PDF ได้: {pdf_file}")
+            except Exception as ex:
+                messagebox.showerror("ผิดพลาด", f"เกิดข้อผิดพลาดในการสร้าง PDF:\n{ex}")
+                
+            # โหลดตารางใหม่
+            self.load_sales_history()
+            
+        # ปุ่มดำเนินการ
+        button_row = ctk.CTkFrame(container, fg_color="transparent")
+        button_row.pack(fill="x", padx=20, pady=(5, 15))
+        
+        ctk.CTkButton(
+            button_row,
+            text="💾 บันทึกข้อมูล & พิมพ์ A4",
+            font=("Sarabun", 13, "bold"),
+            fg_color=COLORS["success"],
+            hover_color="#059669",
+            height=38,
+            command=do_save_and_print
+        ).pack(side="left", fill="x", expand=True, padx=(0, 5))
+        
+        ctk.CTkButton(
+            button_row,
+            text="❌ ยกเลิก",
+            font=("Sarabun", 13),
+            fg_color="#64748B",
+            hover_color="#475569",
+            height=38,
+            command=dialog.destroy
+        ).pack(side="right", fill="x", expand=True, padx=(5, 0))
 
     def export_history_to_excel(self):
         """ส่งออกประวัติการขายตามที่ค้นหาเป็น Excel"""

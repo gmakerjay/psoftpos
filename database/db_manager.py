@@ -23,8 +23,10 @@ class DatabaseManager:
         _pool_size = performance_config.DB_CONNECTION_POOL_SIZE
     except ImportError:
         pass
-    _pool_lock = threading.Lock()  # Thread-safe pool access
-    
+    _pool_lock = threading.RLock()  # Thread-safe reentrant pool access
+    _schema_upgraded = False  # รันอัปเกรด Schema เพียงครั้งเดียวต่อรอบการทำงานโปรแกรม
+    _is_initializing = False  # ป้องกัน Re-entry Loop ตอน Auto-initialize
+
     def __init__(self, db_path=None):
         self.db_path = db_path or DATABASE_PATH
         self.connection = None
@@ -40,6 +42,8 @@ class DatabaseManager:
 
     def _check_and_auto_init(self):
         """ตรวจสอบและสร้างตารางฐานข้อมูลอัตโนมัติหากยังไม่มี เพื่อป้องกันปัญหา no such table"""
+        if DatabaseManager._schema_upgraded or DatabaseManager._is_initializing:
+            return
         try:
             self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
             if not self.cursor.fetchone():
@@ -52,7 +56,11 @@ class DatabaseManager:
 
     def _upgrade_database_schema(self):
         """อัปเกรดฐานข้อมูลแบบปลอดภัย (รักษาความเข้ากันได้ย้อนหลัง)"""
+        if DatabaseManager._schema_upgraded:
+            return
         try:
+            self.cursor.execute("BEGIN IMMEDIATE")
+            
             # 0. สร้างตารางบันทึกประวัติ License
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS license_logs (
@@ -154,6 +162,16 @@ class DatabaseManager:
                 log_info("Altering sales table to add points_used column...")
                 self.cursor.execute("ALTER TABLE sales ADD COLUMN points_used INTEGER DEFAULT 0")
                 
+            # เพิ่มคอลัมน์ customer_tax_id ในตาราง sales ถ้ายังไม่มี
+            if 'customer_tax_id' not in columns:
+                log_info("Altering sales table to add customer_tax_id column...")
+                self.cursor.execute("ALTER TABLE sales ADD COLUMN customer_tax_id TEXT")
+
+            # เพิ่มคอลัมน์ customer_address ในตาราง sales ถ้ายังไม่มี
+            if 'customer_address' not in columns:
+                log_info("Altering sales table to add customer_address column...")
+                self.cursor.execute("ALTER TABLE sales ADD COLUMN customer_address TEXT")
+                
             # เพิ่มคอลัมน์ is_archived ในตาราง returns ถ้ายังไม่มี
             self.cursor.execute("PRAGMA table_info(returns)")
             returns_columns = [col[1] for col in self.cursor.fetchall()]
@@ -178,20 +196,40 @@ class DatabaseManager:
             self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_sales_archived ON sales(is_archived)")
             self.cursor.execute("CREATE INDEX IF NOT EXISTS idx_returns_archived ON returns(is_archived)")
             
+            self.connection.commit()
+            DatabaseManager._schema_upgraded = True
         except Exception as e:
+            try:
+                self.connection.rollback()
+            except Exception:
+                pass
             log_error(f"Error upgrading database schema: {e}")
         
     def connect(self):
         """เชื่อมต่อฐานข้อมูล - ดึง connection จาก pool หรือสร้างใหม่"""
         if self.connection and self.cursor:
             return True
+
+        # ป้องกันปัญหา Orphan WAL/SHM: หากไฟล์ฐานข้อมูลหลักไม่อยู่หรือมีขนาด 0 ไบต์ ให้ลบไฟล์ WAL/SHM ตกค้างก่อนเชื่อมต่อ
+        try:
+            db_p = Path(self.db_path)
+            if not db_p.exists() or db_p.stat().st_size == 0:
+                for suffix in ["-wal", "-shm"]:
+                    wal_f = Path(str(self.db_path) + suffix)
+                    if wal_f.exists():
+                        try:
+                            wal_f.unlink()
+                        except Exception:
+                            pass
+        except Exception:
+            pass
             
         try:
             if self._use_pool:
                 with self._pool_lock:
-                    # ค้นหา connection ที่ไม่ได้ใช้งาน
+                    # ค้นหา connection ที่ไม่ได้ใช้งานและตรงกับ db_path เดียวกัน
                     for conn_id, conn_info in self._connection_pool.items():
-                        if not conn_info['in_use']:
+                        if not conn_info['in_use'] and conn_info.get('db_path') == self.db_path:
                             conn_info['in_use'] = True
                             self.connection = conn_info['connection']
                             self.connection.row_factory = sqlite3.Row
@@ -205,10 +243,11 @@ class DatabaseManager:
                     
                     # ถ้า pool ยังไม่เต็ม สร้าง connection ใหม่
                     if len(self._connection_pool) < self._pool_size:
-                        conn = sqlite3.connect(self.db_path, check_same_thread=False)
+                        conn = sqlite3.connect(self.db_path, timeout=15.0, check_same_thread=False)
                         conn.row_factory = sqlite3.Row
                         # === Performance PRAGMAs (สำคัญมากสำหรับคอมรุ่นเก่า) ===
                         cursor = conn.cursor()
+                        cursor.execute("PRAGMA busy_timeout = 15000")
                         cursor.execute("PRAGMA journal_mode=WAL")       # WAL mode เร็วกว่า DELETE 2-5x
                         cursor.execute("PRAGMA synchronous=NORMAL")     # ลด disk I/O (ปลอดภัยเพียงพอ)
                         cursor.execute("PRAGMA cache_size=-8000")       # 8MB cache (default 2MB)
@@ -218,6 +257,7 @@ class DatabaseManager:
                         conn_id = id(conn)
                         self._connection_pool[conn_id] = {
                             'connection': conn,
+                            'db_path': self.db_path,
                             'in_use': True
                         }
                         self.connection = conn
@@ -226,11 +266,12 @@ class DatabaseManager:
                         return True
             
             # Fallback: สร้าง connection ปกติ
-            self.connection = sqlite3.connect(self.db_path)
+            self.connection = sqlite3.connect(self.db_path, timeout=15.0, check_same_thread=False)
             self.connection.row_factory = sqlite3.Row
             # === Performance PRAGMAs + Foreign Keys on Fallback ===
             try:
                 cursor = self.connection.cursor()
+                cursor.execute("PRAGMA busy_timeout = 15000")
                 cursor.execute("PRAGMA journal_mode=WAL")
                 cursor.execute("PRAGMA synchronous=NORMAL")
                 cursor.execute("PRAGMA cache_size=-8000")
@@ -276,12 +317,20 @@ class DatabaseManager:
     def close_all_connections(cls):
         """ปิด connection ทั้งหมดอย่างสมบูรณ์ (ป้องกัน WinError 32 ตอนลบไฟล์)"""
         with cls._pool_lock:
-            for conn_id, conn_info in cls._connection_pool.items():
+            for conn_id, conn_info in list(cls._connection_pool.items()):
                 try:
-                    conn_info['connection'].close()
-                except Exception as e:
+                    conn = conn_info.get('connection')
+                    if conn:
+                        try:
+                            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                        except Exception:
+                            pass
+                        conn.close()
+                except Exception:
                     pass
             cls._connection_pool.clear()
+            cls._schema_upgraded = False
+            cls._is_initializing = False
             
     def execute(self, query, params=None):
         """Execute SQL query — auto-commit ถ้าไม่อยู่ใน transaction"""
@@ -367,244 +416,251 @@ class DatabaseManager:
             
     def initialize_database(self):
         """สร้างตารางฐานข้อมูลทั้งหมด"""
-        if not self.connect():
-            return False
+        was_connected_before = (self.connection is not None and self.cursor is not None)
+        DatabaseManager._is_initializing = True
+        try:
+            if not self.connect():
+                return False
+                
+            # ตารางผู้ใช้
+            self.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    full_name TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    email TEXT,
+                    phone TEXT,
+                    is_active INTEGER DEFAULT 1,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             
-        # ตารางผู้ใช้
-        self.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL,
-                full_name TEXT NOT NULL,
-                role TEXT NOT NULL,
-                email TEXT,
-                phone TEXT,
-                is_active INTEGER DEFAULT 1,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # ตารางหมวดหมู่สินค้า
-        self.execute("""
-            CREATE TABLE IF NOT EXISTS categories (
-                category_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                category_name TEXT UNIQUE NOT NULL,
-                description TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # ตารางแบรนด์สินค้า
-        self.execute("""
-            CREATE TABLE IF NOT EXISTS brands (
-                brand_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                brand_name TEXT UNIQUE NOT NULL,
-                description TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # ตารางผู้จัดจำหน่าย (Vendors)
-        self.execute("""
-            CREATE TABLE IF NOT EXISTS vendors (
-                vendor_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                vendor_name TEXT NOT NULL,
-                contact_name TEXT,
-                phone TEXT,
-                email TEXT,
-                address TEXT,
-                tax_id TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # ตารางสินค้า
-        self.execute("""
-            CREATE TABLE IF NOT EXISTS products (
-                product_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                barcode TEXT UNIQUE,
-                serial_number TEXT,
-                product_name TEXT NOT NULL,
-                category_id INTEGER,
-                description TEXT,
-                unit TEXT DEFAULT 'ชิ้น',
-                cost_price REAL DEFAULT 0,
-                retail_price REAL DEFAULT 0,
-                wholesale_price REAL DEFAULT 0,
-                special_price1 REAL DEFAULT 0,
-                special_price2 REAL DEFAULT 0,
-                stock_quantity INTEGER DEFAULT 0,
-                min_stock INTEGER DEFAULT 10,
-                image_path TEXT,
-                is_active INTEGER DEFAULT 1,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (category_id) REFERENCES categories (category_id)
-            )
-        """)
-        
-        # ตารางการขาย
-        self.execute("""
-            CREATE TABLE IF NOT EXISTS sales (
-                sale_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sale_number TEXT UNIQUE NOT NULL,
-                sale_date TEXT NOT NULL,
-                user_id INTEGER NOT NULL,
-                customer_name TEXT,
-                price_type TEXT DEFAULT 'retail',
-                subtotal REAL DEFAULT 0,
-                discount_type TEXT DEFAULT 'amount',
-                discount_value REAL DEFAULT 0,
-                discount_amount REAL DEFAULT 0,
-                tax_amount REAL DEFAULT 0,
-                total_amount REAL DEFAULT 0,
-                paid_amount REAL DEFAULT 0,
-                change_amount REAL DEFAULT 0,
-                payment_method TEXT DEFAULT 'cash',
-                status TEXT DEFAULT 'completed',
-                is_archived INTEGER DEFAULT 0,
-                notes TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users (user_id)
-            )
-        """)
-        
-        # ตารางรายละเอียดการขาย
-        self.execute("""
-            CREATE TABLE IF NOT EXISTS sale_items (
-                item_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sale_id INTEGER NOT NULL,
-                product_id INTEGER NOT NULL,
-                product_name TEXT NOT NULL,
-                quantity INTEGER NOT NULL,
-                unit_price REAL NOT NULL,
-                discount_amount REAL DEFAULT 0,
-                total_price REAL NOT NULL,
-                FOREIGN KEY (sale_id) REFERENCES sales (sale_id),
-                FOREIGN KEY (product_id) REFERENCES products (product_id)
-            )
-        """)
-        
-        # ตารางการคืนสินค้า
-        self.execute("""
-            CREATE TABLE IF NOT EXISTS returns (
-                return_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                return_number TEXT UNIQUE NOT NULL,
-                sale_id INTEGER NOT NULL,
-                return_date TEXT NOT NULL,
-                user_id INTEGER NOT NULL,
-                return_type TEXT DEFAULT 'partial',
-                total_amount REAL DEFAULT 0,
-                reason TEXT,
-                status TEXT DEFAULT 'completed',
-                is_archived INTEGER DEFAULT 0,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (sale_id) REFERENCES sales (sale_id),
-                FOREIGN KEY (user_id) REFERENCES users (user_id)
-            )
-        """)
-        
-        # ตารางรายละเอียดการคืนสินค้า
-        self.execute("""
-            CREATE TABLE IF NOT EXISTS return_items (
-                item_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                return_id INTEGER NOT NULL,
-                product_id INTEGER NOT NULL,
-                quantity INTEGER NOT NULL,
-                unit_price REAL NOT NULL,
-                total_price REAL NOT NULL,
-                FOREIGN KEY (return_id) REFERENCES returns (return_id),
-                FOREIGN KEY (product_id) REFERENCES products (product_id)
-            )
-        """)
-        
-        # ตารางการเคลื่อนไหวสต็อก
-        self.execute("""
-            CREATE TABLE IF NOT EXISTS stock_movements (
-                movement_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                product_id INTEGER NOT NULL,
-                movement_type TEXT NOT NULL,
-                quantity INTEGER NOT NULL,
-                reference_id INTEGER,
-                reference_type TEXT,
-                user_id INTEGER NOT NULL,
-                notes TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (product_id) REFERENCES products (product_id),
-                FOREIGN KEY (user_id) REFERENCES users (user_id)
-            )
-        """)
-        
-        # ตารางการพักการขาย
-        self.execute("""
-            CREATE TABLE IF NOT EXISTS parked_sales (
-                park_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                customer_name TEXT,
-                items_json TEXT NOT NULL,
-                price_type TEXT DEFAULT 'retail',
-                subtotal REAL DEFAULT 0,
-                notes TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users (user_id)
-            )
-        """)
-        
-        # ตารางประวัติการเข้าใช้งาน
-        self.execute("""
-            CREATE TABLE IF NOT EXISTS login_history (
-                log_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                login_time TEXT DEFAULT CURRENT_TIMESTAMP,
-                logout_time TEXT,
-                ip_address TEXT,
-                FOREIGN KEY (user_id) REFERENCES users (user_id)
-            )
-        """)
-        
-        # ตารางการตั้งค่า
-        self.execute("""
-            CREATE TABLE IF NOT EXISTS settings (
-                setting_key TEXT PRIMARY KEY,
-                setting_value TEXT,
-                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # ใส่ค่าเริ่มต้นสำหรับเครื่องพิมพ์ XP-58IIH
-        self.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('printer_type', 'thermal')")
-        self.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('paper_size', '58mm')")
-        self.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('printer_name', 'XP-58')")
-        self.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('printer_codepage', '18 (Xprinter, เครื่องจีนส่วนใหญ่)')")
-        
-        # เพิ่ม Index เพื่อรองรับสินค้าจำนวนมาก (1000+)
-        self.execute("CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode)")
-        self.execute("CREATE INDEX IF NOT EXISTS idx_products_name ON products(product_name)")
-        self.execute("CREATE INDEX IF NOT EXISTS idx_products_is_active ON products(is_active)")
-        self.execute("CREATE INDEX IF NOT EXISTS idx_sales_number ON sales(sale_number)")
-        self.execute("CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(sale_date)")
-        self.execute("CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items(sale_id)")
-        
-        # === Composite indexes สำหรับ query ที่ใช้บ่อย (Performance) ===
-        self.execute("CREATE INDEX IF NOT EXISTS idx_products_active_stock ON products(is_active, stock_quantity)")
-        self.execute("CREATE INDEX IF NOT EXISTS idx_products_active_name ON products(is_active, product_name)")
-        self.execute("CREATE INDEX IF NOT EXISTS idx_sales_date_status ON sales(sale_date, status)")
-        self.execute("CREATE INDEX IF NOT EXISTS idx_sale_items_product ON sale_items(product_id)")
-        self.execute("CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(product_id)")
-        
-        # สร้างผู้ใช้ admin เริ่มต้น
-        self._create_default_admin()
-        
-        # สร้างหมวดหมู่เริ่มต้น
-        self._create_default_categories()
-        
-        # อัปเกรดฐานข้อมูลแบบปลอดภัย (สร้างตารางสมาชิก)
-        self._upgrade_database_schema()
-        
-        self.disconnect()
-        return True
+            # ตารางหมวดหมู่สินค้า
+            self.execute("""
+                CREATE TABLE IF NOT EXISTS categories (
+                    category_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    category_name TEXT UNIQUE NOT NULL,
+                    description TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # ตารางแบรนด์สินค้า
+            self.execute("""
+                CREATE TABLE IF NOT EXISTS brands (
+                    brand_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    brand_name TEXT UNIQUE NOT NULL,
+                    description TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # ตารางผู้จัดจำหน่าย (Vendors)
+            self.execute("""
+                CREATE TABLE IF NOT EXISTS vendors (
+                    vendor_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    vendor_name TEXT NOT NULL,
+                    contact_name TEXT,
+                    phone TEXT,
+                    email TEXT,
+                    address TEXT,
+                    tax_id TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # ตารางสินค้า
+            self.execute("""
+                CREATE TABLE IF NOT EXISTS products (
+                    product_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    barcode TEXT UNIQUE,
+                    serial_number TEXT,
+                    product_name TEXT NOT NULL,
+                    category_id INTEGER,
+                    description TEXT,
+                    unit TEXT DEFAULT 'ชิ้น',
+                    cost_price REAL DEFAULT 0,
+                    retail_price REAL DEFAULT 0,
+                    wholesale_price REAL DEFAULT 0,
+                    special_price1 REAL DEFAULT 0,
+                    special_price2 REAL DEFAULT 0,
+                    stock_quantity INTEGER DEFAULT 0,
+                    min_stock INTEGER DEFAULT 10,
+                    image_path TEXT,
+                    is_active INTEGER DEFAULT 1,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (category_id) REFERENCES categories (category_id)
+                )
+            """)
+            
+            # ตารางการขาย
+            self.execute("""
+                CREATE TABLE IF NOT EXISTS sales (
+                    sale_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sale_number TEXT UNIQUE NOT NULL,
+                    sale_date TEXT NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    customer_name TEXT,
+                    customer_tax_id TEXT,
+                    customer_address TEXT,
+                    price_type TEXT DEFAULT 'retail',
+                    subtotal REAL DEFAULT 0,
+                    discount_type TEXT DEFAULT 'amount',
+                    discount_value REAL DEFAULT 0,
+                    discount_amount REAL DEFAULT 0,
+                    tax_amount REAL DEFAULT 0,
+                    total_amount REAL DEFAULT 0,
+                    paid_amount REAL DEFAULT 0,
+                    change_amount REAL DEFAULT 0,
+                    payment_method TEXT DEFAULT 'cash',
+                    status TEXT DEFAULT 'completed',
+                    is_archived INTEGER DEFAULT 0,
+                    notes TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (user_id)
+                )
+            """)
+            
+            # ตารางรายละเอียดการขาย
+            self.execute("""
+                CREATE TABLE IF NOT EXISTS sale_items (
+                    item_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sale_id INTEGER NOT NULL,
+                    product_id INTEGER NOT NULL,
+                    product_name TEXT NOT NULL,
+                    quantity INTEGER NOT NULL,
+                    unit_price REAL NOT NULL,
+                    discount_amount REAL DEFAULT 0,
+                    total_price REAL NOT NULL,
+                    FOREIGN KEY (sale_id) REFERENCES sales (sale_id),
+                    FOREIGN KEY (product_id) REFERENCES products (product_id)
+                )
+            """)
+            
+            # ตารางการคืนสินค้า
+            self.execute("""
+                CREATE TABLE IF NOT EXISTS returns (
+                    return_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    return_number TEXT UNIQUE NOT NULL,
+                    sale_id INTEGER NOT NULL,
+                    return_date TEXT NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    return_type TEXT DEFAULT 'partial',
+                    total_amount REAL DEFAULT 0,
+                    reason TEXT,
+                    status TEXT DEFAULT 'completed',
+                    is_archived INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (sale_id) REFERENCES sales (sale_id),
+                    FOREIGN KEY (user_id) REFERENCES users (user_id)
+                )
+            """)
+            
+            # ตารางรายละเอียดการคืนสินค้า
+            self.execute("""
+                CREATE TABLE IF NOT EXISTS return_items (
+                    item_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    return_id INTEGER NOT NULL,
+                    product_id INTEGER NOT NULL,
+                    quantity INTEGER NOT NULL,
+                    unit_price REAL NOT NULL,
+                    total_price REAL NOT NULL,
+                    FOREIGN KEY (return_id) REFERENCES returns (return_id),
+                    FOREIGN KEY (product_id) REFERENCES products (product_id)
+                )
+            """)
+            
+            # ตารางการเคลื่อนไหวสต็อก
+            self.execute("""
+                CREATE TABLE IF NOT EXISTS stock_movements (
+                    movement_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    product_id INTEGER NOT NULL,
+                    movement_type TEXT NOT NULL,
+                    quantity INTEGER NOT NULL,
+                    reference_id INTEGER,
+                    reference_type TEXT,
+                    user_id INTEGER NOT NULL,
+                    notes TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (product_id) REFERENCES products (product_id),
+                    FOREIGN KEY (user_id) REFERENCES users (user_id)
+                )
+            """)
+            
+            # ตารางการพักการขาย
+            self.execute("""
+                CREATE TABLE IF NOT EXISTS parked_sales (
+                    park_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    customer_name TEXT,
+                    items_json TEXT NOT NULL,
+                    price_type TEXT DEFAULT 'retail',
+                    subtotal REAL DEFAULT 0,
+                    notes TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (user_id)
+                )
+            """)
+            
+            # ตารางประวัติการเข้าใช้งาน
+            self.execute("""
+                CREATE TABLE IF NOT EXISTS login_history (
+                    log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    login_time TEXT DEFAULT CURRENT_TIMESTAMP,
+                    logout_time TEXT,
+                    ip_address TEXT,
+                    FOREIGN KEY (user_id) REFERENCES users (user_id)
+                )
+            """)
+            
+            # ตารางการตั้งค่า
+            self.execute("""
+                CREATE TABLE IF NOT EXISTS settings (
+                    setting_key TEXT PRIMARY KEY,
+                    setting_value TEXT,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # ใส่ค่าเริ่มต้นสำหรับเครื่องพิมพ์ XP-58IIH
+            self.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('printer_type', 'thermal')")
+            self.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('paper_size', '58mm')")
+            self.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('printer_name', 'XP-58')")
+            self.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('printer_codepage', '18 (Xprinter, เครื่องจีนส่วนใหญ่)')")
+            
+            # เพิ่ม Index เพื่อรองรับสินค้าจำนวนมาก (1000+)
+            self.execute("CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode)")
+            self.execute("CREATE INDEX IF NOT EXISTS idx_products_name ON products(product_name)")
+            self.execute("CREATE INDEX IF NOT EXISTS idx_products_is_active ON products(is_active)")
+            self.execute("CREATE INDEX IF NOT EXISTS idx_sales_number ON sales(sale_number)")
+            self.execute("CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(sale_date)")
+            self.execute("CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items(sale_id)")
+            
+            # === Composite indexes สำหรับ query ที่ใช้บ่อย (Performance) ===
+            self.execute("CREATE INDEX IF NOT EXISTS idx_products_active_stock ON products(is_active, stock_quantity)")
+            self.execute("CREATE INDEX IF NOT EXISTS idx_products_active_name ON products(is_active, product_name)")
+            self.execute("CREATE INDEX IF NOT EXISTS idx_sales_date_status ON sales(sale_date, status)")
+            self.execute("CREATE INDEX IF NOT EXISTS idx_sale_items_product ON sale_items(product_id)")
+            self.execute("CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(product_id)")
+            
+            # สร้างผู้ใช้ admin เริ่มต้น
+            self._create_default_admin()
+            
+            # สร้างหมวดหมู่เริ่มต้น
+            self._create_default_categories()
+            
+            # อัปเกรดฐานข้อมูลแบบปลอดภัย (สร้างตารางสมาชิก)
+            self._upgrade_database_schema()
+            return True
+        finally:
+            DatabaseManager._is_initializing = False
+            if not was_connected_before:
+                self.disconnect()
         
     def _create_default_admin(self):
         """สร้างผู้ใช้เริ่มต้น (admin + cashier)"""

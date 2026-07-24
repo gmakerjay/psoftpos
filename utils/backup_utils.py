@@ -189,7 +189,7 @@ def run_auto_backup():
         max_backups = 10
         
         try:
-            db = sqlite3.connect(str(DATABASE_PATH))
+            db = sqlite3.connect(str(DATABASE_PATH), timeout=15.0)
             db.row_factory = sqlite3.Row
             cursor = db.cursor()
             cursor.execute("SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('auto_backup', 'backup_interval_hours', 'max_backups')")
@@ -242,7 +242,7 @@ def run_auto_backup():
         # Flush WAL
         _bk_conn = None
         try:
-            _bk_conn = sqlite3.connect(str(DATABASE_PATH))
+            _bk_conn = sqlite3.connect(str(DATABASE_PATH), timeout=15.0)
             _bk_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         except Exception:
             pass

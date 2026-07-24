@@ -18,6 +18,8 @@ from utils.logger import log_error, log_info
 class HardwareID:
     """จัดการ Hardware ID"""
     
+    _cached_hwid = None
+    
     @staticmethod
     def get_motherboard_uuid():
         """ดึง UUID ของ Motherboard"""
@@ -505,7 +507,7 @@ class LicenseManager:
     
     @staticmethod
     def delete_license():
-        """ลบ License Key และบันทึก Log (ค้นหาและลบทุกตำแหน่งที่พบบนเครื่อง)"""
+        """ลบ License Key และไฟล์ทดลองทั้งหมด (ค้นหาและลบแบบหมดจดในทุกตำแหน่งบนเครื่อง)"""
         try:
             license_key = LicenseManager.load_license()
             deleted_any = False
@@ -522,19 +524,25 @@ class LicenseManager:
             import sys
             import os
             possible_paths = []
+            target_filenames = [".license", ".license_3days", ".license_30days", ".trial", ".trial_3days", ".trial_30days"]
+            
+            folders_to_check = []
             try:
                 if sys.argv and sys.argv[0]:
-                    possible_paths.append(Path(sys.argv[0]).parent.absolute() / "data" / ".license")
+                    folders_to_check.append(Path(sys.argv[0]).parent.absolute())
+                    folders_to_check.append(Path(sys.argv[0]).parent.parent.absolute())
             except: pass
             try:
                 if getattr(sys, 'frozen', False):
-                    possible_paths.append(Path(sys.executable).parent.absolute() / "data" / ".license")
+                    folders_to_check.append(Path(sys.executable).parent.absolute())
+                    folders_to_check.append(Path(sys.executable).parent.parent.absolute())
             except: pass
             try:
-                possible_paths.append(Path(__file__).parent.parent.absolute() / "data" / ".license")
+                folders_to_check.append(Path(__file__).parent.parent.absolute())
+                folders_to_check.append(Path(__file__).parent.parent.parent.absolute())
             except: pass
             try:
-                possible_paths.append(Path("data/.license").absolute())
+                folders_to_check.append(Path(".").absolute())
             except: pass
             
             standard_folders = [
@@ -548,8 +556,30 @@ class LicenseManager:
                 "C:/Program Files (x86)/StorePOS"
             ]
             for folder in standard_folders:
-                possible_paths.append(Path(folder) / "data" / ".license")
+                folders_to_check.append(Path(folder))
+                folders_to_check.append(Path(folder).parent)
                 
+            all_folders = set()
+            for f in folders_to_check:
+                try:
+                    norm = f.resolve().absolute()
+                except:
+                    norm = f.absolute()
+                all_folders.add(norm)
+                for sub in ["StorePOS_Full", "StorePOS_30DayTrial", "StorePOS_3DayTrial", "StorePOS", "Tools", "tools", "data"]:
+                    all_folders.add(norm / sub)
+                    all_folders.add(norm.parent / sub)
+                    
+            for folder in all_folders:
+                for fname in target_filenames:
+                    possible_paths.append(folder / "data" / fname)
+                    possible_paths.append(folder / fname)
+                
+            for folder in folders_to_check:
+                for fname in target_filenames:
+                    possible_paths.append(folder / "data" / fname)
+                    possible_paths.append(folder / fname)
+                    
             seen = set()
             for p in possible_paths:
                 try:
@@ -565,8 +595,17 @@ class LicenseManager:
                         except Exception as e:
                             print(f"Error unlinking {normalized}: {e}")
                             
+            # 3. ล้างตารางสิทธิ์ในฐานข้อมูล SQLite
+            try:
+                db = DatabaseManager()
+                db.connect()
+                db.execute("DELETE FROM settings WHERE setting_key IN ('last_run_timestamp', 'trial_start_date', 'last_run_timestamp_3days', 'trial_start_date_3days')")
+                db.disconnect()
+            except Exception as ex_db:
+                print(f"Error resetting database license settings: {ex_db}")
+
             hwid = HardwareID.generate_hwid()
-            LicenseManager.log_license_action("DISABLE", license_key, hwid, "ทำการปิดใช้งาน (Disable) License ในระบบ")
+            LicenseManager.log_license_action("DISABLE", license_key, hwid, "ทำการถอนไลเซ้นและลบสิทธิ์การใช้งานแบบหมดจด")
             return deleted_any
         except Exception as e:
             print(f"Error deleting license: {e}")

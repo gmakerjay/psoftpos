@@ -6,6 +6,7 @@ from .printer_utils import print_receipt, get_printers, PrinterManager, kick_cas
 from .backup_utils import BackupManager, SalesLogManager, run_auto_backup
 from .image_utils import optimize_image
 from .input_utils import bind_english_input, translate_thai_barcode
+from .system_utils import cleanup_resources, restart_application
 
 __all__ = [
     'BarcodeGenerator',
@@ -25,4 +26,6 @@ __all__ = [
     'run_auto_backup',
     'bind_english_input',
     'translate_thai_barcode',
+    'cleanup_resources',
+    'restart_application',
 ]

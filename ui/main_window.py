@@ -19,8 +19,18 @@ class MainWindow:
     def __init__(self, user_id, user_info):
         self.window = ctk.CTk()
         self.window.title(APP_NAME)
-        self.window.geometry(WINDOW_SIZE)
         self.window.minsize(*MIN_WINDOW_SIZE)
+        
+        # ตรวจสอบขนาดหน้าจอ หากความกว้าง <= 1366 หรือความสูง <= 768 ให้สั่ง Zoomed (Maximized) อัตโนมัติ
+        try:
+            screen_w = self.window.winfo_screenwidth()
+            screen_h = self.window.winfo_screenheight()
+            if screen_w <= 1366 or screen_h <= 768:
+                self.window.state('zoomed')
+            else:
+                self.window.geometry(WINDOW_SIZE)
+        except Exception:
+            self.window.geometry(WINDOW_SIZE)
         
         # ตั้งค่าไอคอนหน้าต่าง
         try:
@@ -140,7 +150,7 @@ class MainWindow:
         
         # เนื้อหาหลัก
         content_frame = ctk.CTkFrame(self.window, fg_color="transparent")
-        content_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        content_frame.pack(fill="both", expand=True, padx=8, pady=(0, 8))
         
         # แถบด้านข้าง (Sidebar)
         self.create_sidebar(content_frame)
@@ -150,23 +160,23 @@ class MainWindow:
         self.content_area.pack(side="right", fill="both", expand=True)
         
     def create_header(self):
-        """สร้างแถบด้านบน"""
-        header = ctk.CTkFrame(self.window, height=70, fg_color=COLORS["primary"])
-        header.pack(fill="x", padx=10, pady=(10, 5))
+        """สร้างแถบด้านบน (ปรับให้กระทัดรัด 50px เพื่อรองรับจอเล็ก)"""
+        header = ctk.CTkFrame(self.window, height=50, fg_color=COLORS["primary"])
+        header.pack(fill="x", padx=8, pady=(6, 4))
         header.pack_propagate(False)
         
         # ชื่อโปรแกรม
         title_label = ctk.CTkLabel(
             header,
             text="🏪 " + APP_NAME,
-            font=FONTS["heading"],
+            font=("Sarabun", 18, "bold"),
             text_color="white"
         )
-        title_label.pack(side="left", padx=20)
+        title_label.pack(side="left", padx=15)
         
         # ข้อมูลผู้ใช้และเวลา
         user_frame = ctk.CTkFrame(header, fg_color="transparent")
-        user_frame.pack(side="right", padx=20)
+        user_frame.pack(side="right", padx=15)
         
         # เวลา
         self.time_label = ctk.CTkLabel(
@@ -181,10 +191,10 @@ class MainWindow:
         user_label = ctk.CTkLabel(
             user_frame,
             text=f"👤 {self.user_info['full_name']} ({USER_ROLES[self.user_info['role']]})",
-            font=FONTS["body"],
+            font=("Sarabun", 12),
             text_color="white"
         )
-        user_label.pack(anchor="e", pady=(5, 0))
+        user_label.pack(anchor="e", pady=(0, 0))
         
         # อัพเดทเวลาทุกวินาที
         self.update_time()
@@ -200,8 +210,8 @@ class MainWindow:
             pass
         
     def create_sidebar(self, parent):
-        """สร้างแถบเมนูด้านข้าง"""
-        sidebar = ctk.CTkFrame(parent, width=250, fg_color=COLORS["dark"])
+        """สร้างแถบเมนูด้านข้าง (ปรับขนาดปุ่มเป็น 38px เพื่อให้ครบทุกเมนูบนจอ 700px)"""
+        sidebar = ctk.CTkFrame(parent, width=220, fg_color=COLORS["dark"])
         sidebar.pack(side="left", fill="y", padx=0, pady=0)
         sidebar.pack_propagate(False)
         
@@ -230,22 +240,22 @@ class MainWindow:
             btn = ctk.CTkButton(
                 sidebar,
                 text=text,
-                font=("Sarabun", 16, "bold"),
-                height=50,
+                font=("Sarabun", 14, "bold"),
+                height=38,
                 fg_color="transparent",
                 hover_color=COLORS["primary"],
                 anchor="w",
                 command=lambda p=page_id: self.change_page(p)
             )
-            btn.pack(fill="x", padx=10, pady=5)
+            btn.pack(fill="x", padx=8, pady=2)
             self.menu_buttons[page_id] = btn
             
         # ปุ่มออกจากระบบ
         logout_btn = ctk.CTkButton(
             sidebar,
             text="ออกจากระบบ",
-            font=("Sarabun", 16, "bold"),
-            height=50,
+            font=("Sarabun", 14, "bold"),
+            height=38,
             fg_color=COLORS["danger"],
             hover_color="#cc0000",
             command=self.logout
@@ -502,7 +512,13 @@ class MainWindow:
         
         if result:
             self.window.destroy()
-            sys.exit(0)
+            try:
+                from utils.system_utils import cleanup_resources
+                cleanup_resources()
+            except Exception:
+                pass
+            import os
+            os._exit(0)
             
     def on_closing(self):
         """จัดการเมื่อปิดหน้าต่าง"""

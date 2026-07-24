@@ -16,7 +16,7 @@ class LoginWindow:
     def __init__(self, license_data=None):
         self.window = ctk.CTk()
         self.window.title(f"{APP_NAME} - เข้าสู่ระบบ")
-        self.window.geometry("500x600")
+        self.window.geometry("500x640")
         self.window.resizable(False, False)
         self.license_data = license_data
         
@@ -46,21 +46,21 @@ class LoginWindow:
     def center_window(self):
         """วางหน้าต่างกลางจอ"""
         self.window.update_idletasks()
-        width = self.window.winfo_width()
-        height = self.window.winfo_height()
-        x = (self.window.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.window.winfo_screenheight() // 2) - (height // 2)
+        width = self.window.winfo_width() or 500
+        height = self.window.winfo_height() or 640
+        x = max(0, (self.window.winfo_screenwidth() // 2) - (width // 2))
+        y = max(0, (self.window.winfo_screenheight() // 2) - (height // 2))
         self.window.geometry(f'{width}x{height}+{x}+{y}')
         
     def create_widgets(self):
         """สร้าง UI"""
         # Container หลัก
         main_frame = ctk.CTkFrame(self.window, fg_color="transparent")
-        main_frame.pack(expand=True, fill="both", padx=40, pady=40)
+        main_frame.pack(expand=True, fill="both", padx=40, pady=25)
         
         # โลโก้/ชื่อโปรแกรม
         logo_frame = ctk.CTkFrame(main_frame, fg_color=COLORS["primary"], corner_radius=15)
-        logo_frame.pack(pady=(0, 30), fill="x")
+        logo_frame.pack(pady=(0, 20), fill="x")
         
         title_label = ctk.CTkLabel(
             logo_frame,
@@ -68,7 +68,7 @@ class LoginWindow:
             font=FONTS["title"],
             text_color="white"
         )
-        title_label.pack(pady=20)
+        title_label.pack(pady=15)
         
         subtitle_label = ctk.CTkLabel(
             logo_frame,
@@ -76,7 +76,7 @@ class LoginWindow:
             font=FONTS["body"],
             text_color="white"
         )
-        subtitle_label.pack(pady=(0, 20))
+        subtitle_label.pack(pady=(0, 15))
         
         # ตรวจสอบสิทธิ์ว่ามีข้อมูลทดลองใช้งานหรือไม่
         trial_info_text = None
@@ -105,7 +105,7 @@ class LoginWindow:
             font=FONTS["heading"],
             text_color=COLORS["primary"]
         )
-        login_title.pack(pady=(30, 20))
+        login_title.pack(pady=(20, 10))
         
         # ชื่อผู้ใช้
         username_label = ctk.CTkLabel(
@@ -114,7 +114,7 @@ class LoginWindow:
             font=FONTS["body"],
             text_color=COLORS["text_dark"]
         )
-        username_label.pack(pady=(20, 5), anchor="w", padx=40)
+        username_label.pack(pady=(10, 5), anchor="w", padx=40)
         
         self.username_entry = ctk.CTkEntry(
             login_frame,
@@ -148,26 +148,26 @@ class LoginWindow:
             text="เข้าสู่ระบบ",
             font=("Sarabun", 16, "bold"),
             width=220,
-            height=54,
-            corner_radius=27,
+            height=50,
+            corner_radius=25,
             fg_color=COLORS["primary"],
             hover_color=COLORS["secondary"],
             command=self.login
         )
-        self.login_button.pack(pady=(0, 15))
+        self.login_button.pack(pady=(0, 20))
         
-        # ข้อมูลเริ่มต้น
-        info_frame = ctk.CTkFrame(login_frame, fg_color=COLORS["light"], corner_radius=10)
-        info_frame.pack(pady=(10, 30), padx=40, fill="x")
+        # ข้อมูลช่องทางติดต่อผู้ดูแล/ต่ออายุ
+        contact_frame = ctk.CTkFrame(login_frame, fg_color="#eef6fc", corner_radius=10)
+        contact_frame.pack(pady=(0, 20), padx=40, fill="x")
         
-        info_label = ctk.CTkLabel(
-            info_frame,
-            text="ผู้ใช้เริ่มต้น\nชื่อผู้ใช้: admin | รหัสผ่าน: admin",
-            font=FONTS["small"],
-            text_color=COLORS["text_light"],
+        contact_label = ctk.CTkLabel(
+            contact_frame,
+            text="📞 ช่องทางติดต่อ (ต่ออายุ / แจ้งปัญหา)\nเบอร์ / Line: 0848400908",
+            font=("Sarabun", 13, "bold"),
+            text_color=COLORS["primary"],
             justify="center"
         )
-        info_label.pack(pady=15)
+        contact_label.pack(pady=12)
         
         # เวอร์ชัน
         version_label = ctk.CTkLabel(
@@ -176,7 +176,7 @@ class LoginWindow:
             font=FONTS["small"],
             text_color=COLORS["text_light"]
         )
-        version_label.pack(pady=(10, 0))
+        version_label.pack(pady=(5, 0))
         
         # Bind Enter key
         self.password_entry.bind("<Return>", lambda e: self.login())

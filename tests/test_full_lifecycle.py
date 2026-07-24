@@ -27,7 +27,8 @@ def run_lifecycle_test():
     db.execute("INSERT OR IGNORE INTO categories (category_id, category_name) VALUES (2, 'ขนมขบเคี้ยว')")
     
     # ลบสินค้าเก่าออกก่อนเพื่อเริ่มต้นใหม่แบบคลีน
-    db.execute("DELETE FROM products")
+    for table in ["stock_movements", "return_items", "returns", "sale_items", "sales", "parked_sales", "products"]:
+        db.execute(f"DELETE FROM {table}")
     
     test_products = [
         ("8850999010010", "น้ำดื่ม ตราสิงห์ 600มล", 1, 5.00, 10.00, 9.00, 9.50, 8.50, 120, 10, "ขวด"),
@@ -101,8 +102,8 @@ def run_lifecycle_test():
     # 3. ล้างตารางสินค้าทั้งหมด (Reset)
     print("\n=== 3. ล้างฐานข้อมูลสินค้าทั้งหมด (Reset) ===")
     db.connect()
-    db.execute("DELETE FROM products")
-    db.execute("DELETE FROM categories")
+    for table in ["stock_movements", "return_items", "returns", "sale_items", "sales", "parked_sales", "products", "categories"]:
+        db.execute(f"DELETE FROM {table}")
     
     check_empty = db.fetch_all("SELECT product_id FROM products WHERE is_active = 1")
     db.disconnect()

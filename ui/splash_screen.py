@@ -141,20 +141,27 @@ class SplashScreen:
         self.on_complete_callback = None
         self.task_results = {}
         self.is_running = True
+        self.is_completed_naturally = False
         
-        self.root.update()
+        try:
+            self.root.update()
+        except Exception:
+            pass
 
     def update_progress(self, val: float, status_text: str = None):
         """อัปเดตเปอร์เซ็นต์ (0.0 ถึง 1.0) และข้อความสถานะ"""
-        val = min(max(val, 0.0), 1.0)
-        self.progress_bar.set(val)
-        percent_int = int(val * 100)
-        self.lbl_percent.configure(text=f"{percent_int}%")
-        
-        if status_text:
-            self.lbl_status.configure(text=status_text)
+        try:
+            val = min(max(val, 0.0), 1.0)
+            self.progress_bar.set(val)
+            percent_int = int(val * 100)
+            self.lbl_percent.configure(text=f"{percent_int}%")
             
-        self.root.update_idletasks()
+            if status_text:
+                self.lbl_status.configure(text=status_text)
+                
+            self.root.update_idletasks()
+        except Exception:
+            pass
 
     def run_tasks_threaded(self, task_list, on_complete):
         """
@@ -164,6 +171,7 @@ class SplashScreen:
         on_complete: ฟังก์ชันที่จะเรียกบน Main Thread เมื่อทุกงานเสร็จสิ้น
         """
         self.on_complete_callback = on_complete
+        self.is_completed_naturally = False
         
         # เริ่ม Background Worker Thread
         thread = threading.Thread(
@@ -175,7 +183,16 @@ class SplashScreen:
         
         # เริ่มลูปเช็ค Queue บน Main Thread
         self.root.after(20, self._check_queue)
-        self.root.mainloop()
+        try:
+            self.root.mainloop()
+        except Exception as e:
+            print(f"Splash mainloop exception: {e}")
+            
+        # หลัง mainloop ถอนออกจาก stack อย่างสมบูรณ์แล้ว ให้เรียก callback
+        if self.is_completed_naturally and callable(self.on_complete_callback):
+            cb = self.on_complete_callback
+            self.on_complete_callback = None
+            cb(self.task_results)
 
     def _worker_thread(self, task_list):
         """Worker Thread ทำงานในพื้นหลัง"""
@@ -214,24 +231,28 @@ class SplashScreen:
                     self.update_progress(progress, text)
                 elif msg_type == 'complete':
                     self.update_progress(1.0, text)
-                    self.root.after(100, lambda: self._finish(payload))
+                    self.root.after(50, lambda: self._finish(payload))
                     return
         except Exception:
             pass
             
         if self.is_running:
-            self.root.after(20, self._check_queue)
+            try:
+                self.root.after(20, self._check_queue)
+            except Exception:
+                pass
 
     def _finish(self, results):
-        """เสร็จสิ้นกระบวนการ ปิด Splash และเรียก Callback"""
+        """เสร็จสิ้นกระบวนการ ปิด Splash และคืน Event Loop สู่ Main Thread"""
         self.is_running = False
+        self.is_completed_naturally = True
+        self.task_results = results or {}
         try:
+            self.root.withdraw()
+            self.root.quit()
             self.root.destroy()
         except Exception:
             pass
-            
-        if callable(self.on_complete_callback):
-            self.on_complete_callback(results)
 
     def force_exit(self):
         """ผู้ใช้กดปิด Splash Screen"""

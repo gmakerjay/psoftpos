@@ -194,8 +194,29 @@ TAX_INVOICE
         story.append(Spacer(1, 5*mm))
         
         # === ตารางสินค้า ===
+        header_center_style = ParagraphStyle(
+            'HeaderCenter',
+            fontName='THSarabunBold',
+            fontSize=12,
+            alignment=TA_CENTER,
+            textColor=colors.white
+        )
+        header_right_style = ParagraphStyle(
+            'HeaderRight',
+            fontName='THSarabunBold',
+            fontSize=12,
+            alignment=TA_RIGHT,
+            textColor=colors.white
+        )
+
         items_data = [
-            ['ลำดับ', 'รายการ', 'จำนวน', 'ราคา/หน่วย', 'จำนวนเงิน']
+            [
+                Paragraph("<b>ลำดับ</b>", header_center_style),
+                Paragraph("<b>รายการ</b>", header_center_style),
+                Paragraph("<b>จำนวน</b>", header_right_style),
+                Paragraph("<b>ราคา/หน่วย</b>", header_right_style),
+                Paragraph("<b>จำนวนเงิน</b>", header_right_style)
+            ]
         ]
         
         for i, item in enumerate(invoice_data['items'], 1):
@@ -207,11 +228,12 @@ TAX_INVOICE
                 f"{item['amount']:,.2f}"
             ])
         
-        # เว้นบรรทัดว่าง
-        for _ in range(max(0, 10 - len(invoice_data['items']))):
-            items_data.append(['', '', '', '', ''])
+        # เว้นบรรทัดว่างเฉพาะกรณีที่มีรายการน้อยกว่า 10 รายการ
+        if len(invoice_data['items']) < 10:
+            for _ in range(10 - len(invoice_data['items'])):
+                items_data.append(['', '', '', '', ''])
         
-        items_table = Table(items_data, colWidths=[15*mm, 95*mm, 20*mm, 25*mm, 25*mm])
+        items_table = Table(items_data, colWidths=[15*mm, 95*mm, 20*mm, 25*mm, 25*mm], repeatRows=1)
         items_table.setStyle(TableStyle([
             # Header
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1565C0')),

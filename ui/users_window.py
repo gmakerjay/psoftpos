@@ -329,7 +329,7 @@ class UsersManagementFrame(ctk.CTkFrame):
         else:
             dialog.title("เพิ่มผู้ใช้ใหม่")
         
-        dialog.geometry("550x650")
+        dialog.geometry(get_responsive_dialog_geometry(self, 550, 620))
         dialog.transient(self)
         dialog.grab_set()
         
@@ -501,7 +501,7 @@ class UsersManagementFrame(ctk.CTkFrame):
         """เปลี่ยนรหัสผ่าน"""
         dialog = ctk.CTkToplevel(self)
         dialog.title(f"เปลี่ยนรหัสผ่าน - {user['username']}")
-        dialog.geometry("450x350")
+        dialog.geometry(get_responsive_dialog_geometry(self, 450, 350))
         dialog.transient(self)
         dialog.grab_set()
         

@@ -357,18 +357,17 @@ class POSFrame(ctk.CTkFrame):
             text_color="white"
         ).pack(pady=15)
         
-        # รายการในตะกร้า
+        # รายการในตะกร้า (Dynamic height for responsive UI)
         self.cart_list = ctk.CTkScrollableFrame(
             parent,
             fg_color=COLORS["light"],
-            corner_radius=0,
-            height=300
+            corner_radius=0
         )
-        self.cart_list.pack(fill="both", expand=True)
+        # Packed at the end of create_right_panel
         
         # ค้นหาและเลือกสมาชิก
         member_frame = ctk.CTkFrame(parent, fg_color="white", corner_radius=0)
-        member_frame.pack(fill="x", padx=15, pady=(15, 0))
+        member_frame.pack(side="bottom", fill="x", padx=15, pady=(5, 5))
         
         ctk.CTkLabel(
             member_frame,
@@ -420,7 +419,7 @@ class POSFrame(ctk.CTkFrame):
         
         # ส่วนลด
         discount_frame = ctk.CTkFrame(parent, fg_color="white", corner_radius=0)
-        discount_frame.pack(fill="x", padx=15, pady=15)
+        discount_frame.pack(side="bottom", fill="x", padx=15, pady=(0, 5))
         
         ctk.CTkLabel(
             discount_frame,
@@ -452,7 +451,7 @@ class POSFrame(ctk.CTkFrame):
         
         # สรุปยอด
         summary_frame = ctk.CTkFrame(parent, fg_color=COLORS["light"], corner_radius=10)
-        summary_frame.pack(fill="x", padx=15, pady=(0, 15))
+        summary_frame.pack(side="bottom", fill="x", padx=15, pady=(0, 5))
         
         # ยอดรวม
         sum_frame = ctk.CTkFrame(summary_frame, fg_color="transparent")
@@ -551,38 +550,38 @@ class POSFrame(ctk.CTkFrame):
         
         # ยอดสุทธิ
         total_frame = ctk.CTkFrame(summary_frame, fg_color="transparent")
-        total_frame.pack(fill="x", padx=15, pady=(5, 15))
+        total_frame.pack(fill="x", padx=15, pady=(2, 6))
         
         ctk.CTkLabel(
             total_frame,
             text="ยอดสุทธิ:",
-            font=("Sarabun", 18, "bold")
+            font=("Sarabun", 16, "bold")
         ).pack(side="left")
         
         self.total_label = ctk.CTkLabel(
             total_frame,
             text="฿0.00",
-            font=("Sarabun", 48, "bold"),
+            font=("Sarabun", 32, "bold"),
             text_color="#27ae60"  # สีเขียวเข้มขึ้น
         )
         self.total_label.pack(side="right")
         
         # แสดงรับเงิน/เงินทอนล่าสุด
         self.last_payment_frame = ctk.CTkFrame(summary_frame, fg_color="white", corner_radius=10)
-        self.last_payment_frame.pack(fill="x", padx=15, pady=(0, 10))
+        self.last_payment_frame.pack(fill="x", padx=15, pady=(0, 6))
         
         # แถวเงินรับ
         recv_row = ctk.CTkFrame(self.last_payment_frame, fg_color="transparent")
-        recv_row.pack(fill="x", padx=10, pady=(5, 0))
+        recv_row.pack(fill="x", padx=10, pady=(3, 0))
         ctk.CTkLabel(recv_row, text="รับเงินล่าสุด:", font=FONTS["small"]).pack(side="left")
         self.last_paid_label = ctk.CTkLabel(recv_row, text="฿0.00", font=FONTS["body"])
         self.last_paid_label.pack(side="right")
         
         # แถวเงินทอน
         change_row = ctk.CTkFrame(self.last_payment_frame, fg_color="transparent")
-        change_row.pack(fill="x", padx=10, pady=(0, 5))
+        change_row.pack(fill="x", padx=10, pady=(0, 3))
         ctk.CTkLabel(change_row, text="เงินทอน:", font=FONTS["body"], text_color=COLORS["success"]).pack(side="left")
-        self.last_change_label = ctk.CTkLabel(change_row, text="฿0.00", font=("Sarabun", 18, "bold"), text_color=COLORS["success"])
+        self.last_change_label = ctk.CTkLabel(change_row, text="฿0.00", font=("Sarabun", 16, "bold"), text_color=COLORS["success"])
         self.last_change_label.pack(side="right")
         
         # ซ่อนไว้ก่อน
@@ -590,18 +589,21 @@ class POSFrame(ctk.CTkFrame):
 
         # ปุ่มด้านล่าง
         btn_frame = ctk.CTkFrame(parent, fg_color="white", corner_radius=0)
-        btn_frame.pack(fill="x", padx=15, pady=(0, 15))
+        btn_frame.pack(side="bottom", fill="x", padx=15, pady=(5, 10))
         
         checkout_btn = ctk.CTkButton(
             btn_frame,
             text="💰 ชำระเงิน (F10)",
             font=("Sarabun", 16, "bold"),
-            height=60,
+            height=48,
             fg_color=COLORS["success"],
             hover_color="#45a049",
             command=self.show_checkout_dialog
         )
-        checkout_btn.pack(fill="x", pady=5)
+        checkout_btn.pack(fill="x", pady=2)
+        
+        # Pack cart_list at the top to consume remaining space
+        self.cart_list.pack(side="top", fill="both", expand=True)
 
         
     def load_all_products(self):
@@ -1176,11 +1178,8 @@ class POSFrame(ctk.CTkFrame):
         dialog = ctk.CTkToplevel(self)
         dialog.title("ชำระเงิน")
         
-        # ปรับขนาดให้เหมาะสมหากมีสมาชิกเพื่อรองรับช่องใส่แต้ม
-        if self.selected_member_id:
-            dialog.geometry("520x680")
-        else:
-            dialog.geometry("520x550")
+        target_h = 660 if self.selected_member_id else 540
+        dialog.geometry(get_responsive_dialog_geometry(self, 520, target_h))
             
         dialog.transient(self)
         dialog.grab_set()

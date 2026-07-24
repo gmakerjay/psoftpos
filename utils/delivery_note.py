@@ -154,8 +154,29 @@ class DeliveryNoteGenerator:
         story.append(Spacer(1, 5*mm))
         
         # === ตารางสินค้า ===
+        header_center_style = ParagraphStyle(
+            'DNHeaderCenter',
+            fontName='THSarabunBold',
+            fontSize=12,
+            alignment=TA_CENTER,
+            textColor=colors.white
+        )
+        header_left_style = ParagraphStyle(
+            'DNHeaderLeft',
+            fontName='THSarabunBold',
+            fontSize=12,
+            alignment=TA_LEFT,
+            textColor=colors.white
+        )
+
         items_data = [
-            ['ลำดับ', 'รายการสินค้า', 'จำนวน', 'หน่วย', 'หมายเหตุ']
+            [
+                Paragraph("<b>ลำดับ</b>", header_center_style),
+                Paragraph("<b>รายการสินค้า</b>", header_left_style),
+                Paragraph("<b>จำนวน</b>", header_center_style),
+                Paragraph("<b>หน่วย</b>", header_center_style),
+                Paragraph("<b>หมายเหตุ</b>", header_left_style)
+            ]
         ]
         
         for i, item in enumerate(delivery_data['items'], 1):

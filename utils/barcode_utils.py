@@ -36,6 +36,14 @@ class BarcodeGenerator:
                 # Code128 รองรับทุกตัวอักษร
                 barcode_class = barcode.get_barcode_class('code128')
             
+            # ตัวเลือกปรับขนาดบาร์โค้ดให้เล็กลงกะทัดรัด (~0.5 เท่า)
+            writer_options = {
+                'module_height': 7.0,  # ลดความสูงบาร์โค้ดลงครึ่งหนึ่งจาก 15.0mm
+                'module_width': 0.2,
+                'quiet_zone': 1.5,
+                'font_size': 8,
+            }
+            
             # สร้างบาร์โค้ด
             if output_path:
                 # บันทึกเป็นไฟล์
@@ -43,13 +51,13 @@ class BarcodeGenerator:
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 
                 barcode_instance = barcode_class(code, writer=ImageWriter())
-                filename = barcode_instance.save(str(output_path.with_suffix('')))
+                filename = barcode_instance.save(str(output_path.with_suffix('')), options=writer_options)
                 return filename
             else:
                 # คืนเป็น PIL Image
                 barcode_instance = barcode_class(code, writer=ImageWriter())
                 buffer = io.BytesIO()
-                barcode_instance.write(buffer)
+                barcode_instance.write(buffer, options=writer_options)
                 buffer.seek(0)
                 return Image.open(buffer)
                 

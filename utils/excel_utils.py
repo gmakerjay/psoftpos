@@ -124,11 +124,12 @@ class ExcelManager:
         """
         try:
             import pandas as pd
-            df = pd.read_excel(filename, sheet_name=sheet_name, header=header_row)
+            clean_path = str(Path(filename).resolve())
+            df = pd.read_excel(clean_path, sheet_name=sheet_name, header=header_row)
             return df.to_dict('records')
         except Exception as e:
             print(f"Error importing from Excel: {e}")
-            return []
+            raise e
     
     @staticmethod
     def export_products_template():

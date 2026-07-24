@@ -496,16 +496,10 @@ class ProductManagementFrame(ctk.CTkFrame):
         """
         dialog = ctk.CTkToplevel(self)
         dialog.title("เพิ่มสินค้าใหม่")
-        dialog.geometry("500x320")
+        dialog.geometry(get_responsive_dialog_geometry(self, 500, 320))
         dialog.transient(self)
         dialog.grab_set()
         dialog.resizable(False, False)
-
-        # จัดกลางจอ
-        dialog.update_idletasks()
-        x = (dialog.winfo_screenwidth() // 2) - 250
-        y = (dialog.winfo_screenheight() // 2) - 160
-        dialog.geometry(f"+{x}+{y}")
 
         # กรอบหลัก
         main = ctk.CTkFrame(dialog, fg_color=COLORS["light"])
@@ -816,15 +810,9 @@ class ProductManagementFrame(ctk.CTkFrame):
         """แสดงหน้าต่างฟอร์มสินค้า - REBUILT เพื่อความถูกต้อง 100%"""
         dialog = ctk.CTkToplevel(self)
         dialog.title(title)
-        dialog.geometry("750x850") # ปรับขนาดเล็กน้อย
+        dialog.geometry(get_responsive_dialog_geometry(self, 750, 780))
         dialog.transient(self)
         dialog.grab_set()
-        
-        # ปรับการวางตำแหน่งหนน้าต่างให้อยู่กลางจอ
-        dialog.update_idletasks()
-        x = (dialog.winfo_screenwidth() // 2) - (750 // 2)
-        y = (dialog.winfo_screenheight() // 2) - (850 // 2)
-        dialog.geometry(f"+{x}+{y}")
         
         # กรอบหลัก
         main_container = ctk.CTkFrame(dialog, fg_color=COLORS["light"])
@@ -1437,7 +1425,8 @@ class ProductManagementFrame(ctk.CTkFrame):
 
         # อ่านข้อมูลจาก Excel
         try:
-            data = ExcelManager.import_from_excel(file_path, header_row=3)
+            clean_path = str(Path(file_path).resolve())
+            data = ExcelManager.import_from_excel(clean_path, header_row=3)
         except Exception as e:
             messagebox.showerror("ผิดพลาด", f"ไม่สามารถอ่านไฟล์ได้:\n{e}")
             return
@@ -1714,17 +1703,12 @@ class BarcodePrintDialog(ctk.CTkToplevel):
         self.db = parent.db
         
         self.title("ระบบพิมพ์ป้ายบาร์โค้ดสินค้า (Bulk Barcode Label Printer)")
-        self.geometry("980x680")
+        self.geometry(get_responsive_dialog_geometry(self.parent, 980, 650))
         self.resizable(True, True)
         
         # ตั้งค่าให้อยู่ตรงกลางจอและแย่ง focus
         self.transient(parent)
         self.grab_set()
-        
-        self.update_idletasks()
-        x = (self.winfo_screenwidth() - 980) // 2
-        y = (self.winfo_screenheight() - 680) // 2
-        self.geometry(f"+{x}+{y}")
         
         # จัดเก็บรายการสินค้าที่จะพิมพ์ {product_id: item_dict}
         self.selected_items = {}
@@ -1814,16 +1798,18 @@ class BarcodePrintDialog(ctk.CTkToplevel):
         self.layout_combo = ctk.CTkComboBox(
             right_column,
             values=[
+                "A4: 6 คอลัมน์ x 18 แถว (ดวงกะทัดรัด 3cm x 1.5cm - 108 ดวง/หน้า)",
+                "A4: 6 คอลัมน์ x 14 แถว (ดวงละ 3cm x 2cm - 84 ดวง/หน้า)",
                 "A4: 3 คอลัมน์ x 10 แถว (30 ดวง/หน้า)",
                 "A4: 4 คอลัมน์ x 12 แถว (48 ดวง/หน้า)",
                 "A4: 5 คอลัมน์ x 15 แถว (75 ดวง/หน้า)"
             ],
             font=("Sarabun", 14),
             height=35,
-            width=280,
+            width=340,
             state="readonly"
         )
-        self.layout_combo.set("A4: 3 คอลัมน์ x 10 แถว (30 ดวง/หน้า)")
+        self.layout_combo.set("A4: 6 คอลัมน์ x 18 แถว (ดวงกะทัดรัด 3cm x 1.5cm - 108 ดวง/หน้า)")
         self.layout_combo.pack(anchor="w", padx=15, pady=(0, 15))
         
         # ตัวเลือกฟิลด์ข้อมูลที่จะพิมพ์
@@ -2087,7 +2073,11 @@ class BarcodePrintDialog(ctk.CTkToplevel):
             
         # หาขนาดกริดตามที่เลือก
         layout_str = self.layout_combo.get()
-        if "3 คอลัมน์" in layout_str:
+        if "18 แถว" in layout_str:
+            cols, rows = 6, 18
+        elif "14 แถว" in layout_str:
+            cols, rows = 6, 14
+        elif "3 คอลัมน์" in layout_str:
             cols, rows = 3, 10
         elif "4 คอลัมน์" in layout_str:
             cols, rows = 4, 12

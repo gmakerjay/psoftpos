@@ -183,7 +183,7 @@ class MemberManagementFrame(ctk.CTkFrame):
     def show_member_dialog(self, title, member=None):
         dialog = ctk.CTkToplevel(self)
         dialog.title(title)
-        dialog.geometry("600x600")
+        dialog.geometry(get_responsive_dialog_geometry(self, 600, 580))
         dialog.transient(self)
         dialog.grab_set()
         
@@ -272,7 +272,7 @@ class MemberManagementFrame(ctk.CTkFrame):
         """แสดง dialog ปรับปรุงคะแนน/แต้ม/กระเป๋าเงิน (เตรียมสำหรับ POS Wallet/Points)"""
         dialog = ctk.CTkToplevel(self)
         dialog.title(f"สะสมแต้ม & Credit - {member['name']}")
-        dialog.geometry("450x450")
+        dialog.geometry(get_responsive_dialog_geometry(self, 450, 420))
         dialog.transient(self)
         dialog.grab_set()
         
@@ -347,7 +347,7 @@ class MemberManagementFrame(ctk.CTkFrame):
         """ตั้งค่าระดับสมาชิก (Tiers)"""
         dialog = ctk.CTkToplevel(self)
         dialog.title("ตั้งค่าระดับสมาชิก")
-        dialog.geometry("600x550")
+        dialog.geometry(get_responsive_dialog_geometry(self, 600, 500))
         dialog.transient(self)
         dialog.grab_set()
         
@@ -392,7 +392,7 @@ class MemberManagementFrame(ctk.CTkFrame):
         def add_tier():
             add_win = ctk.CTkToplevel(dialog)
             add_win.title("เพิ่มระดับสมาชิกใหม่")
-            add_win.geometry("400x300")
+            add_win.geometry(get_responsive_dialog_geometry(dialog, 400, 300))
             add_win.transient(dialog)
             add_win.grab_set()
             
@@ -465,7 +465,7 @@ class MemberManagementFrame(ctk.CTkFrame):
         """ดูประวัติการทำธุรกรรมย้อนหลังของสมาชิกรายคน (Member History)"""
         dialog = ctk.CTkToplevel(self)
         dialog.title(f"ประวัติธุรกรรม - {member['name']}")
-        dialog.geometry("850x650")
+        dialog.geometry(get_responsive_dialog_geometry(self, 850, 600))
         dialog.transient(self)
         dialog.grab_set()
         

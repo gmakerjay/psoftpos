@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ui import LoginWindow, MainWindow, SplashScreen
 from ui.activation_window import ActivationWindow
 from utils.license_system import LicenseManager
+from utils.system_utils import cleanup_resources, restart_application
 from utils.logger import get_logger, log_info, log_error, log_user_action, new_log_session
 from config import *
 import customtkinter as ctk
@@ -77,6 +78,18 @@ def register_process_font():
     except Exception as e:
         print(f"Failed to register process font: {e}")
 
+
+
+def safe_exit(code=0):
+    """ทำความสะอาดคืนทรัพยากร และบังคับปิดโปรแกรมระดับ OS เพื่อป้องกัน Process ค้าง"""
+    try:
+        cleanup_resources()
+    except Exception:
+        pass
+    import os
+    os._exit(code)
+
+
 def main():
     """ฟังก์ชันหลักของโปรแกรม (Multi-threaded Edition สำหรับคอมพิวเตอร์รุ่นเก่า)"""
     try:
@@ -107,9 +120,9 @@ def main():
         tasks = [
             ("dirs", "กำลังตรวจสอบโครงสร้างโฟลเดอร์...", task_dirs),
             ("font", "กำลังลงทะเบียนฟอนต์ภาษาไทย...", task_font),
-            ("backup", "กำลังเริ่มต้นระบบ Auto Backup ในพื้นหลัง...", task_backup),
             ("license", "🔐 กำลังตรวจสอบสิทธิ์การใช้งาน (License)...", task_lic),
             ("db", "💾 กำลังเตรียมฐานข้อมูลและโครงสร้างระบบ...", task_db),
+            ("backup", "กำลังเริ่มต้นระบบ Auto Backup ในพื้นหลัง...", task_backup),
         ]
 
         def on_loading_complete(results):
@@ -135,7 +148,7 @@ def main():
                 if not is_activated:
                     logger.warning("❌ ยกเลิกการใช้งาน - ไม่มี Activation")
                     print("Exit - No Activation")
-                    sys.exit(0)
+                    safe_exit(0)
             else:
                 logger.info(f"✅ โปรแกรมได้รับการ Activate แล้ว")
                 logger.info(f"📅 หมดอายุ: {license_data.get('expire_date', 'N/A')}")
@@ -155,7 +168,7 @@ def main():
                     if level == 'expired':
                         mb.showerror(title, msg, parent=_root)
                         _root.destroy()
-                        sys.exit(0)
+                        safe_exit(0)
                     elif level == 'critical':
                         mb.showwarning(title, msg, parent=_root)
                     else:
@@ -185,47 +198,21 @@ def main():
             
             logger.info("POS System Stopped")
             logger.info("="*70)
+            safe_exit(0)
 
         splash.run_tasks_threaded(tasks, on_loading_complete)
-
-
-        
-        # ถ้า login สำเร็จ เปิดหน้าหลัก
-        if user_id and user_info:
-            full_name = user_info['full_name'] if 'full_name' in user_info.keys() else 'Unknown'
-            log_user_action(user_id, "LOGIN", f"User: {full_name}")
-            logger.info(f"User {user_id} logged in: {full_name}")
-            
-            # เริ่ม Session ใหม่
-            new_log_session("USER_LOGIN")
-            
-            main_app = MainWindow(user_id, user_info)
-            main_app.run()
-            
-            logger.info(f"User {user_id} logged out")
-        else:
-            logger.info("Cancelled - No Login")
-            print("Cancelled - No Login")
-        
-        logger.info("POS System Stopped")
-        logger.info("="*70)
-            
     except KeyboardInterrupt:
         logger.info("\nProgram cancelled by user (Ctrl+C)")
         print("\nProgram cancelled by user")
-        sys.exit(0)
+        safe_exit(0)
     except Exception as e:
         logger.critical(f"Critical Error: {e}", exc_info=True)
         print(f"Error occurred: {e}")
         import traceback
         traceback.print_exc()
-        sys.exit(1)
+        safe_exit(1)
     finally:
-        try:
-            from database.db_manager import DatabaseManager
-            DatabaseManager.close_all_connections()
-        except Exception:
-            pass
+        safe_exit(0)
 
 
 

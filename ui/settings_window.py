@@ -929,10 +929,31 @@ class SettingsFrame(ctk.CTkFrame):
             btn_container,
             text="🚫 ปิดใช้งานสิทธิ์",
             font=FONTS["button"],
-            width=180,
+            width=150,
             height=45,
             fg_color=COLORS["danger"],
             command=run_disable
+        ).pack(side="left", padx=5)
+        
+        def run_reset_to_activate():
+            if not messagebox.askyesno("ยืนยันรีเซ็ตสิทธิ์", "คุณแน่ใจว่าต้องการลบสิทธิ์เครื่องและกลับไปหน้า Activate (ลงทะเบียน) ใหม่ใช่หรือไม่?"):
+                return
+            LicenseManager.delete_license()
+            from ui.activation_window import ActivationWindow
+            act_win = ActivationWindow(self.winfo_toplevel(), on_success=lambda: messagebox.showinfo("สำเร็จ", "ลงทะเบียนสิทธิ์ใหม่เรียบร้อยแล้ว!"))
+            self.winfo_toplevel().wait_window(act_win)
+            self.create_license_tab()
+            
+        # ปุ่มรีเซ็ตกลับหน้า Activate
+        ctk.CTkButton(
+            btn_container,
+            text="🧹 รีเซ็ตสิทธิ์ (กลับหน้า Activate)",
+            font=FONTS["button"],
+            width=230,
+            height=45,
+            fg_color="#8B5CF6",
+            hover_color="#7C3AED",
+            command=run_reset_to_activate
         ).pack(side="left", padx=5)
 
     def load_settings(self):
@@ -1301,7 +1322,7 @@ class SettingsFrame(ctk.CTkFrame):
             messagebox.showerror("ข้อผิดพลาด", f"ไม่สามารถสำรองข้อมูลได้: {e}")
     
     def restore_database(self):
-        """กู้คืนข้อมูล"""
+        """กู้คืนข้อมูลแบบปลอดภัย (Safe ZIP Extraction & Clean File Replacement)"""
         result = messagebox.askyesno(
             "ยืนยัน",
             "การกู้คืนจะเขียนทับข้อมูลปัจจุบัน\nต้องการดำเนินการต่อหรือไม่?"
@@ -1320,59 +1341,102 @@ class SettingsFrame(ctk.CTkFrame):
         
         try:
             import zipfile
+            import gc
             
-            with zipfile.ZipFile(filename, 'r') as zipf:
-                # แตก zip
-                zipf.extractall("data/restore_temp")
+            # Normalize path สำหรับ Windows
+            zip_path = Path(filename).resolve()
+            if not zip_path.exists():
+                messagebox.showerror("ข้อผิดพลาด", "ไม่พบไฟล์สำรองข้อมูลที่เลือก")
+                return
+
+            temp_dir = Path("data/restore_temp").resolve()
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            temp_dir.mkdir(parents=True, exist_ok=True)
             
-            # ย้ายไฟล์
-            temp_dir = Path("data/restore_temp")
+            # 1. แตกไฟล์ ZIP แบบปลอดภัย (กรองไฟล์ขยะ OS และชื่อไฟล์ที่มีปัญหาบน Windows)
+            with zipfile.ZipFile(str(zip_path), 'r') as zipf:
+                for member in zipf.infolist():
+                    # ข้ามไฟล์ขยะ macOS / system
+                    if "__MACOSX" in member.filename or member.filename.endswith(".DS_Store"):
+                        continue
+                    # ข้าม path ที่มีตัวอักษรที่ไม่ได้รับอนุญาตบน Windows
+                    member_path = Path(member.filename)
+                    if any(part in ("..", "/", "\\") for part in member_path.parts):
+                        continue
+                    zipf.extract(member, temp_dir)
             
-            # ปิด connection ก่อนกู้คืน
-            type(self.db).close_all_connections()
-            from config import DATABASE_PATH
-            
-            # ลบไฟล์ WAL และ SHM เพื่อป้องกันฐานข้อมูลพังจากการกู้คืนในโหมด WAL (WAL corruption)
+            # 2. ปิดการเชื่อมต่อฐานข้อมูลทั้งหมด (รวมถึง self.db และ pool)
             try:
-                db_wal = Path(DATABASE_PATH).with_name(Path(DATABASE_PATH).name + "-wal")
-                db_shm = Path(DATABASE_PATH).with_name(Path(DATABASE_PATH).name + "-shm")
-                if db_wal.exists():
-                    db_wal.unlink()
-                if db_shm.exists():
-                    db_shm.unlink()
-            except Exception as e:
-                print(f"Error removing WAL/SHM files during restore: {e}")
+                self.db.disconnect()
+            except Exception:
+                pass
+            from database.db_manager import DatabaseManager
+            DatabaseManager.close_all_connections()
+            gc.collect()  # เคลียร์ connection ตกค้างใน memory
             
-            # รองรับทั้ง backup แบบใหม่ (database.db) และแบบเก่า (sales.db)
+            from config import DATABASE_PATH, PRODUCTS_IMG_DIR
+            target_db = Path(DATABASE_PATH).resolve()
+            
+            # 3. ลบไฟล์ WAL และ SHM เพื่อป้องกันฐานข้อมูลพังจากการกู้คืนในโหมด WAL (WAL corruption)
+            for suffix in ["-wal", "-shm"]:
+                f_aux = Path(str(target_db) + suffix)
+                if f_aux.exists():
+                    try:
+                        f_aux.unlink()
+                    except Exception as ex_aux:
+                        print(f"Warning unlinking aux file {f_aux}: {ex_aux}")
+            
+            # 4. ย้ายฐานข้อมูลคืน
+            restored_db_src = None
             if (temp_dir / "database.db").exists():
-                shutil.copy(temp_dir / "database.db", DATABASE_PATH)
+                restored_db_src = temp_dir / "database.db"
             elif (temp_dir / "sales.db").exists():
-                shutil.copy(temp_dir / "sales.db", DATABASE_PATH)
+                restored_db_src = temp_dir / "sales.db"
+            elif (temp_dir / "storepos.db").exists():
+                restored_db_src = temp_dir / "storepos.db"
+                
+            if restored_db_src and restored_db_src.exists():
+                # ลบไฟล์เดิมก่อนกู้คืนเพื่อป้องกัน Errno 22 / File Access Error บน Windows
+                if target_db.exists():
+                    try:
+                        target_db.unlink()
+                    except Exception:
+                        pass
+                shutil.copy2(restored_db_src, target_db)
             
-            # คืนรูปภาพสินค้า (BUG-012)
+            # 5. คืนรูปภาพสินค้า
             img_restore_dir = temp_dir / "products_img"
+            if not img_restore_dir.exists():
+                img_restore_dir = temp_dir / "products"
             if img_restore_dir.exists():
-                dest_img_dir = PRODUCTS_IMG_DIR
+                dest_img_dir = Path(PRODUCTS_IMG_DIR).resolve()
                 dest_img_dir.mkdir(parents=True, exist_ok=True)
                 for img_file in img_restore_dir.iterdir():
-                    if img_file.is_file():
-                        shutil.copy(img_file, dest_img_dir / img_file.name)
+                    if img_file.is_file() and not img_file.name.startswith("."):
+                        try:
+                            shutil.copy2(img_file, dest_img_dir / img_file.name)
+                        except Exception as e_img:
+                            print(f"Error restoring image {img_file}: {e_img}")
             
-            # คืนใบเสร็จ (BUG-012)
+            # 6. คืนใบเสร็จ
             receipt_restore_dir = temp_dir / "receipts"
             if receipt_restore_dir.exists():
-                dest_receipt_dir = Path("data/receipts")
+                dest_receipt_dir = Path("data/receipts").resolve()
                 dest_receipt_dir.mkdir(parents=True, exist_ok=True)
                 for receipt_file in receipt_restore_dir.iterdir():
-                    if receipt_file.is_file():
-                        shutil.copy(receipt_file, dest_receipt_dir / receipt_file.name)
+                    if receipt_file.is_file() and not receipt_file.name.startswith("."):
+                        try:
+                            shutil.copy2(receipt_file, dest_receipt_dir / receipt_file.name)
+                        except Exception as e_rec:
+                            print(f"Error restoring receipt {receipt_file}: {e_rec}")
             
             # ลบ temp
-            shutil.rmtree(temp_dir)
+            shutil.rmtree(temp_dir, ignore_errors=True)
             
             messagebox.showinfo(
                 "สำเร็จ",
-                "กู้คืนข้อมูลสำเร็จ!\nกรุณาปิดโปรแกรมและเปิดใหม่"
+                "กู้คืนข้อมูลสำเร็จ!\nกรุณาปิดโปรแกรมและเปิดใหม่เพื่อเริ่มใช้งานข้อมูลล่าสุด"
             )
         except Exception as e:
             messagebox.showerror("ข้อผิดพลาด", f"ไม่สามารถกู้คืนข้อมูลได้: {e}")
@@ -1413,7 +1477,8 @@ class SettingsFrame(ctk.CTkFrame):
             "การรีเซ็ตจะลบข้อมูลทั้งหมด!\n"
             "รวมถึง: สินค้า, ยอดขาย, ประวัติ, ผู้ใช้\n\n"
             "คุณแน่ใจหรือไม่?",
-            icon="warning"
+            icon="warning",
+            parent=self
         )
         
         if not result:
@@ -1425,30 +1490,57 @@ class SettingsFrame(ctk.CTkFrame):
             "ข้อมูลทั้งหมดจะถูกลบถาวร ไม่สามารถกู้คืนได้!\n\n"
             "กรุณากด 'Yes' เพื่อยืนยันการรีเซ็ต\n"
             "หรือกด 'No' เพื่อยกเลิก",
-            icon="warning"
+            icon="warning",
+            parent=self
         )
         
         if confirm:
             try:
+                import gc
                 # ปิดทุก connection ก่อนลบไฟล์ (ลดโอกาสการเกิด PermissionError/WinError 32)
-                type(self.db).close_all_connections()
+                try:
+                    self.db.disconnect()
+                except Exception:
+                    pass
+                from database.db_manager import DatabaseManager
+                DatabaseManager.close_all_connections()
+                gc.collect()
 
-                # ลบฐานข้อมูล
-                db_path = Path("data/sales.db")
-                if db_path.exists():
-                    db_path.unlink()
-                
-                # ลบ database หลักด้วย
                 from config import DATABASE_PATH
-                if Path(DATABASE_PATH).exists():
-                    Path(DATABASE_PATH).unlink()
                 
+                # รายการไฟล์ DB ที่ต้องลบ รวมถึงไฟล์ WAL และ SHM
+                target_dbs = [Path("data/sales.db"), Path(DATABASE_PATH)]
+                for target in target_dbs:
+                    for suffix in ["", "-wal", "-shm"]:
+                        f_path = Path(str(target) + suffix)
+                        if f_path.exists():
+                            try:
+                                f_path.unlink()
+                            except Exception as e:
+                                print(f"Error unlinking {f_path}: {e}")
+
+                # รีเซ็ต Class Attribute เพิ่มความมั่นใจ
+                DatabaseManager._schema_upgraded = False
+                DatabaseManager._is_initializing = False
+
                 messagebox.showinfo(
-                    "สำเร็จ",
-                    "รีเซ็ตระบบสำเร็จ!\nกรุณาปิดโปรแกรมและเปิดใหม่"
+                    "สำเร็จ 🎉",
+                    "รีเซ็ตระบบสำเร็จ!\nโปรแกรมจะเริ่มทำงานใหม่ในทันที",
+                    parent=self
                 )
+                
+                # ปิดหน้าต่างหลักและสั่ง Restart แอปพลิเคชันอย่างสะอาด
+                try:
+                    top = self.winfo_toplevel()
+                    top.destroy()
+                except Exception:
+                    pass
+                
+                from utils.system_utils import restart_application
+                restart_application()
+                
             except Exception as e:
-                messagebox.showerror("ข้อผิดพลาด", f"ไม่สามารถรีเซ็ตได้: {e}")
+                messagebox.showerror("ข้อผิดพลาด", f"ไม่สามารถรีเซ็ตได้: {e}", parent=self)
                 
     def save_auto_backup_settings(self):
         """บันทึกการตั้งค่าสำรองข้อมูลอัตโนมัติ"""

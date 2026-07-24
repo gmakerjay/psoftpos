@@ -4,6 +4,42 @@
 
 ---
 
+## [1.0.5] - 2026-07-22
+
+### 🚀 1. แก้ไขปัญหา Splash Screen โหลดค้าง (Splash Screen Event Loop Stack Unrolling Fix)
+* **ปัญหาที่พบ:** หน้า Splash Screen โหลดเข้าได้บ้างค้างบ้าง โดยเฉพาะตอนสลับเปิดหน้าต่าง Login เนื่องจากคำสั่ง `on_complete_callback` ถูกเรียกขณะที่ยังอยู่ภายใน Event Loop Callback (`after()`) ของ Splash Window ที่กำลังสั่ง `.quit()` และ `.destroy()` ทำให้ CustomTkinter เกิด Tcl Exception หรือติดขัดในลูป `check_dpi_scaling`
+* **ไฟล์ที่แก้ไข:** [ui/splash_screen.py](file:///c:/Users/admin/Documents/store-pos/ui/splash_screen.py)
+* **การแก้ไข:** 
+  * ปรับปรุง `SplashScreen` ย้ายการเรียก `on_complete(results)` ให้ออกมารันนอก Event Loop Stack **หลังจาก `self.root.mainloop()` ถอนตัวออกอย่างสมบูรณ์**
+  * ครอบ `update_progress` ด้วย `try...except (ctk.TclError, Exception)` ป้องกันข้อผิดพลาดจากการอัปเดต GUI ขณะปิดตัว
+
+---
+
+### ⚡ 2. ป้องกัน Infinite Recursion และปรับแต่ง Connection Pool (`database/db_manager.py`)
+* **ปัญหาที่พบ:** `_check_and_auto_init()` มีการเรียก `initialize_database()` ซึ่งกลับมาเรียก `connect()` -> `_check_and_auto_init()` ซ้ำซ้อน และ Connection Pool ไม่ได้ตรวจ `db_path` ทำให้ instance สำหรับ temporary DB ดึง connection ของ DB หลักไปใช้
+* **ไฟล์ที่แก้ไข:** [database/db_manager.py](file:///c:/Users/admin/Documents/store-pos/database/db_manager.py)
+* **การแก้ไข:**
+  * เพิ่ม Flag `_is_initializing` เพื่อป้องกันปัญหา Re-entry Loop ตอน Auto-initialize ตาราง
+  * เพิ่มการตรวจสอบ `conn_info.get('db_path') == self.db_path` ใน Connection Pool
+  * ปรับปรุง `close_all_connections()` ให้เคลียร์ WAL Log (`PRAGMA wal_checkpoint(TRUNCATE)`) และรีเซ็ต Class State `_schema_upgraded = False` และ `_is_initializing = False` ให้พร้อมสำหรับการสร้าง DB ใหม่ทันที
+
+---
+
+### 🔄 3. ปรับปรุงระบบ Hard Reset และระบบ Auto-Restart อัตโนมัติ (`ui/settings_window.py` & `utils/system_utils.py`)
+* **ปัญหาที่พบ:** การทำ Hard Reset ในการตั้งค่าเพียงลบไฟล์ DB บนดิสก์ แต่เปิดหน้าต่างหลักค้างไว้ ทำให้คลิกทำงานต่อแล้วแครช และเมื่อรีสตาร์ทโปรแกรมใหม่ Class State `_schema_upgraded` ยังเป็น True ทำให้ข้ามการสร้างตารางบน DB ใหม่
+* **ไฟล์ที่แก้ไข:** [ui/settings_window.py](file:///c:/Users/admin/Documents/store-pos/ui/settings_window.py), [utils/system_utils.py](file:///c:/Users/admin/Documents/store-pos/utils/system_utils.py), [utils/__init__.py](file:///c:/Users/admin/Documents/store-pos/utils/__init__.py), [main.py](file:///c:/Users/admin/Documents/store-pos/main.py), [main_trial_30days.py](file:///c:/Users/admin/Documents/store-pos/main_trial_30days.py)
+* **การแก้ไข:**
+  * สร้างโมดูล `utils/system_utils.py` รวมฟังก์ชัน `cleanup_resources()` และ `restart_application()`
+  * ปรับปรุง `SettingsWindow.reset_system()` ให้เคลียร์ DB Connection, ลบไฟล์ DB ทุกตัว (`database.db`, `sales.db`, `-wal`, `-shm`), เคลียร์ State และสั่ง `restart_application()` อัตโนมัติทันที
+  * โปรแกรมจะปิดตัว คืนทรัพยากร และรีสตาร์ทกระบวนการเปิดขึ้นมาใหม่โดยอัตโนมัติ (Splash Screen -> Auto-create DB -> Login Window) โดยไม่ค้าง
+
+---
+
+### 🧪 4. ระบบทดสอบยืนยันเสถียรภาพ (Verification Tests)
+* **สิ่งที่ทำ:** สร้าง script `tests/test_splash_and_reset_verification.py` ยืนยันการสร้าง DB ใหม่จากไฟล์ว่างเปล่า และลำดับขั้นตอน Hard Reset ➔ Re-initialize ผลการทดสอบผ่าน 100% พร้อมทดสอบร่วมกับ `verify_license_system.py` (39/39 Passed)
+
+---
+
 ## [1.0.4] - 2026-07-17
 
 ### 👥 1. ปรับปรุงระบบจัดการสมาชิกและระบบแต้มสะสมใหม่ (Simplified Member & Points System)

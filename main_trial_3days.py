@@ -71,6 +71,34 @@ def register_process_font():
     except Exception as e:
         print(f"Failed to register process font: {e}")
 
+def cleanup_resources():
+    """ทำความสะอาดคืนทรัพยากร ปิดการเชื่อมต่อฐานข้อมูล ปิดไฟล์ Log ยกเลิกฟอนต์ และย้าย Working Directory เพื่อปลดล็อกโฟลเดอร์บน Windows"""
+    try:
+        from database.db_manager import DatabaseManager
+        DatabaseManager.close_all_connections()
+    except Exception:
+        pass
+    try:
+        import platform
+        if platform.system() == 'Windows':
+            import ctypes
+            base_path = os.path.dirname(os.path.abspath(__file__))
+            font_path = os.path.join(base_path, "FC Sara Samkan [Non-commercial] Bold.ttf")
+            if os.path.exists(font_path):
+                ctypes.windll.gdi32.RemoveFontResourceW(font_path)
+    except Exception:
+        pass
+    try:
+        import logging
+        logging.shutdown()
+    except Exception:
+        pass
+    try:
+        import os
+        os.chdir(os.path.expanduser("~"))
+    except Exception:
+        pass
+
 def main():
     """ฟังก์ชันหลักของโปรแกรม"""
     try:
@@ -170,6 +198,8 @@ def main():
         import traceback
         traceback.print_exc()
         sys.exit(1)
+    finally:
+        cleanup_resources()
 
 
 if __name__ == "__main__":

@@ -27,6 +27,7 @@ except Exception as e:
 from ui import LoginWindow, MainWindow, SplashScreen
 from ui.activation_window import ActivationWindow
 from utils.license_system import LicenseManager
+from utils.system_utils import cleanup_resources, restart_application
 from utils.logger import get_logger, log_info, log_error, log_user_action, new_log_session
 from config import *
 import customtkinter as ctk
@@ -89,6 +90,8 @@ def run_backup_on_expiry():
         logger.info("✅ Auto Backup completed before trial expiry notification.")
     except Exception as e:
         logger.error(f"⚠️ Backup on expiry failed: {e}")
+
+
 
 def main():
     """ฟังก์ชันหลักของโปรแกรม (เปิดโปรแกรมได้ทันทีภายใน 1.5 วินาที)"""
@@ -179,11 +182,7 @@ def main():
         traceback.print_exc()
         sys.exit(1)
     finally:
-        try:
-            from database.db_manager import DatabaseManager
-            DatabaseManager.close_all_connections()
-        except Exception:
-            pass
+        cleanup_resources()
 
 
 
@@ -369,8 +368,7 @@ class ExpiredModeWindow:
                 )
                 self.root.destroy()
                 # รีสตาร์ทโปรแกรมเข้าโหมดปกติ
-                python = sys.executable
-                os.execl(python, python, *sys.argv)
+                restart_application()
 
             act_win = ActivationWindow(self.root, on_success=on_activate_success)
         except Exception as e:

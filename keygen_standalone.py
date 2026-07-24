@@ -251,14 +251,15 @@ class KeyGenApp(ctk.CTk):
         self.hwid_entry.pack(fill="x", padx=20, pady=(5, 12))
 
         # Expiry Combo
-        ctk.CTkLabel(left_panel, text="อายุการใช้งาน (วัน):", font=("Sarabun", 13)).pack(anchor="w", padx=20)
+        ctk.CTkLabel(left_panel, text="อายุการใช้งาน (เลือกหรือพิมพ์จำนวนวันตามใจ):", font=("Sarabun", 13)).pack(anchor="w", padx=20)
         self.expire_var = ctk.StringVar(value="365")
         self.expire_combo = ctk.CTkComboBox(
             left_panel,
-            values=["1", "7", "15", "30", "90", "180", "365", "ไม่จำกัด"],
+            values=["1", "7", "15", "30", "45", "60", "90", "180", "365", "730", "ไม่จำกัด"],
             variable=self.expire_var,
             font=("Sarabun", 13),
-            height=35
+            height=35,
+            state="normal"
         )
         self.expire_combo.pack(fill="x", padx=20, pady=(5, 15))
 
@@ -294,40 +295,51 @@ class KeyGenApp(ctk.CTk):
             text="🛠️ เครื่องมือบำรุงรักษา (Maintenance)",
             font=("Sarabun", 16, "bold"),
             text_color="#F87171"
-        ).pack(anchor="w", padx=20, pady=(20, 10))
+        ).pack(anchor="w", padx=20, pady=(15, 8))
 
         # Button 1: Force Close POS (KillProcess)
         ctk.CTkButton(
             right_panel,
             text="⚡ ปิดโปรแกรมที่ค้างอยู่ (Kill Process)",
-            font=("Sarabun", 13, "bold"),
+            font=("Sarabun", 12, "bold"),
             fg_color="#EF4444",
             hover_color="#DC2626",
-            height=45,
+            height=38,
             command=self.run_kill_process
-        ).pack(fill="x", padx=20, pady=12)
+        ).pack(fill="x", padx=20, pady=6)
 
         # Button 2: Deactivate License (ถอนไลเซ้น)
         ctk.CTkButton(
             right_panel,
             text="🚫 ถอนไลเซ้น (Deactivate License)",
-            font=("Sarabun", 13, "bold"),
+            font=("Sarabun", 12, "bold"),
             fg_color="#F59E0B",
             hover_color="#D97706",
-            height=45,
+            height=38,
             command=self.run_deactivate_license
-        ).pack(fill="x", padx=20, pady=12)
+        ).pack(fill="x", padx=20, pady=6)
 
         # Button 3: Reset Registration & Clear Database memory (ล้างความจำเครื่อง)
         ctk.CTkButton(
             right_panel,
             text="🧹 ล้างความจำเครื่อง (Reset Activation & DB)",
-            font=("Sarabun", 13, "bold"),
+            font=("Sarabun", 12, "bold"),
             fg_color="#8B5CF6",
             hover_color="#7C3AED",
-            height=45,
+            height=38,
             command=self.run_reset_license_cache
-        ).pack(fill="x", padx=20, pady=12)
+        ).pack(fill="x", padx=20, pady=6)
+
+        # Button 4: Reset & Launch Activate Window Immediately
+        ctk.CTkButton(
+            right_panel,
+            text="🚀 รีเซ็ตสิทธิ์ & เปิดหน้า Activate ทันที",
+            font=("Sarabun", 12, "bold"),
+            fg_color="#10B981",
+            hover_color="#059669",
+            height=38,
+            command=self.run_reset_and_launch_activate
+        ).pack(fill="x", padx=20, pady=6)
 
 
         # Bottom Panel: Result Key & System Log
@@ -380,12 +392,17 @@ class KeyGenApp(ctk.CTk):
             messagebox.showerror("ผิดพลาด", "รูปแบบ Hardware ID ไม่ถูกต้อง")
             return
 
-        expire_str = self.expire_var.get()
-        if expire_str == "ไม่จำกัด":
+        expire_str = self.expire_var.get().strip()
+        if "ไม่จำกัด" in expire_str:
             expire_days = 36500
         else:
             try:
-                expire_days = int(expire_str)
+                import re
+                nums = re.findall(r'\d+', expire_str)
+                if nums:
+                    expire_days = int(nums[0])
+                else:
+                    expire_days = 365
             except:
                 expire_days = 365
 
@@ -394,7 +411,7 @@ class KeyGenApp(ctk.CTk):
             self.current_key = key
             
             self.log_text.delete("1.0", "end")
-            self.log(f"🔑 สร้างรหัสสำเร็จ (อายุการใช้งาน {expire_str} วัน):")
+            self.log(f"🔑 สร้างรหัสสำเร็จ (อายุการใช้งาน {expire_days} วัน):")
             self.log_text.insert("end", f"\n{key}\n\n")
             self.log("📋 ทำการคัดลอก Key ไปยัง Clipboard อัตโนมัติเรียบร้อย")
             
@@ -402,6 +419,71 @@ class KeyGenApp(ctk.CTk):
             self.clipboard_append(key)
         except Exception as e:
             messagebox.showerror("ผิดพลาด", f"ไม่สามารถสร้าง License Key ได้: {e}")
+
+    def run_reset_and_launch_activate(self):
+        """🚀 รีเซ็ตสิทธิ์และเปิดโปรแกรมกลับหน้า Activate ทันที"""
+        self.run_kill_process()
+        self.run_reset_license_cache()
+        self.log("🚀 กำลังค้นหาและเปิดโปรแกรม POS...")
+        try:
+            exe_to_run = None
+            py_to_run = None
+            
+            search_folders = self._get_search_folders()
+            
+            # ค้นหาไฟล์ Executable ของตัวเต็มหรือตัวทดลองก่อน
+            for folder in search_folders:
+                full_exe = folder / "StorePOS.exe"
+                if full_exe.exists():
+                    exe_to_run = full_exe
+                    break
+                    
+            if not exe_to_run:
+                for folder in search_folders:
+                    trial_exe = folder / "StorePOS_30DayTrial.exe"
+                    if trial_exe.exists():
+                        exe_to_run = trial_exe
+                        break
+                        
+            if not exe_to_run:
+                for folder in search_folders:
+                    full_exe_sub = folder / "StorePOS_Full" / "StorePOS.exe"
+                    if full_exe_sub.exists():
+                        exe_to_run = full_exe_sub
+                        break
+                        
+            if not exe_to_run:
+                for folder in search_folders:
+                    trial_exe_sub = folder / "StorePOS_30DayTrial" / "StorePOS_30DayTrial.exe"
+                    if trial_exe_sub.exists():
+                        exe_to_run = trial_exe_sub
+                        break
+
+            # ค้นหาไฟล์สคริปต์ Python ในกรณี Dev Environment
+            if not exe_to_run:
+                for folder in search_folders:
+                    m_py = folder / "main.py"
+                    if m_py.exists():
+                        py_to_run = m_py
+                        break
+                    m_py_parent = folder.parent / "main.py"
+                    if m_py_parent.exists():
+                        py_to_run = m_py_parent
+                        break
+
+            if exe_to_run:
+                self.log(f"🚀 กำลังเปิดแอปพลิเคชัน: {exe_to_run.name}...")
+                subprocess.Popen([str(exe_to_run)], cwd=str(exe_to_run.parent))
+                self.log(f"✅ เปิดหน้า Activate ของ {exe_to_run.name} เรียบร้อยแล้ว!")
+            elif py_to_run:
+                self.log("🚀 กำลังรัน Python main.py...")
+                py_executable = sys.executable
+                subprocess.Popen([py_executable, str(py_to_run)], cwd=str(py_to_run.parent))
+                self.log("✅ เปิดหน้า Activate ของ StorePOS (main.py) เรียบร้อยแล้ว!")
+            else:
+                self.log("⚠️ ไม่พบตัวติดตั้ง StorePOS.exe หรือ main.py ในโฟลเดอร์ระบบ กรุณาเปิดแอปพลิเคชันด้วยตนเอง")
+        except Exception as e:
+            self.log(f"❌ ไม่สามารถเปิดโปรแกรมได้: {e}")
 
     def copy_key(self):
         if hasattr(self, 'current_key'):
@@ -483,29 +565,43 @@ class KeyGenApp(ctk.CTk):
         self.log(f"✅ ทำการปิดโปรแกรมที่ค้างในระบบแล้ว (รวม {killed_count} processes)")
         messagebox.showinfo("สำเร็จ", f"ปิดโปรแกรม POS ค้างในเบื้องหลังเรียบร้อยแล้ว (รวม {killed_count} รายการ)")
 
-    def _get_all_possible_license_paths(self):
-        """สแกนหาไฟล์ License ทั้งหมดในตำแหน่งยอดนิยม"""
-        possible_paths = []
+    def _get_search_folders(self):
+        """ดึงรายการโฟลเดอร์ที่เป็นไปได้ทั้งหมดที่ติดตั้งตัวแอปพลิเคชันหรือตัวทดลอง"""
+        folders = []
         try:
             if sys.argv and sys.argv[0]:
-                possible_paths.append(Path(sys.argv[0]).parent.absolute() / "data" / ".license")
-                possible_paths.append(Path(sys.argv[0]).parent.absolute() / "data" / ".license_3days")
+                p = Path(sys.argv[0]).parent.absolute()
+                folders.append(p)
+                folders.append(p.parent)
         except: pass
         try:
             if getattr(sys, 'frozen', False):
-                possible_paths.append(Path(sys.executable).parent.absolute() / "data" / ".license")
-                possible_paths.append(Path(sys.executable).parent.absolute() / "data" / ".license_3days")
+                p = Path(sys.executable).parent.absolute()
+                folders.append(p)
+                folders.append(p.parent)
         except: pass
         try:
-            possible_paths.append(Path(__file__).parent.parent.absolute() / "data" / ".license")
-            possible_paths.append(Path(__file__).parent.parent.absolute() / "data" / ".license_3days")
+            folders.append(Path(__file__).parent.parent.absolute())
+            folders.append(Path(__file__).parent.absolute())
         except: pass
         try:
-            possible_paths.append(Path("data/.license").absolute())
-            possible_paths.append(Path("data/.license_3days").absolute())
+            folders.append(Path(".").absolute())
         except: pass
         
-        standard_folders = [
+        # สแกนโฟลเดอร์บน Desktop และ Documents ที่มีคำว่า StorePOS
+        for parent_dir_path in [os.path.expanduser("~/Desktop"), os.path.expanduser("~/Documents")]:
+            try:
+                p_path = Path(parent_dir_path)
+                if p_path.exists():
+                    for sub_dir in p_path.iterdir():
+                        if sub_dir.is_dir() and "storepos" in sub_dir.name.lower():
+                            folders.append(sub_dir)
+                            folders.append(sub_dir / "StorePOS_Full")
+                            folders.append(sub_dir / "StorePOS_30DayTrial")
+            except:
+                pass
+
+        standard_roots = [
             "C:/StorePOS",
             "D:/StorePOS",
             os.path.expanduser("~/Documents/store-pos"),
@@ -515,9 +611,32 @@ class KeyGenApp(ctk.CTk):
             "C:/Program Files/StorePOS",
             "C:/Program Files (x86)/StorePOS"
         ]
-        for folder in standard_folders:
-            possible_paths.append(Path(folder) / "data" / ".license")
-            possible_paths.append(Path(folder) / "data" / ".license_3days")
+        for root in standard_roots:
+            folders.append(Path(root))
+            folders.append(Path(root).parent)
+
+        all_dirs = set()
+        for f in folders:
+            try:
+                norm = f.resolve().absolute()
+            except:
+                norm = f.absolute()
+            all_dirs.add(norm)
+            for sub in ["StorePOS_Full", "StorePOS_30DayTrial", "StorePOS_3DayTrial", "StorePOS", "Tools", "tools", "data"]:
+                all_dirs.add(norm / sub)
+                all_dirs.add(norm.parent / sub)
+        return list(all_dirs)
+
+    def _get_all_possible_license_paths(self):
+        """สแกนหาไฟล์ License และ Trial ทั้งหมดในทุกตำแหน่งบนเครื่อง"""
+        target_filenames = [".license", ".license_3days", ".license_30days", ".trial", ".trial_3days", ".trial_30days"]
+        folders_to_check = self._get_search_folders()
+            
+        possible_paths = []
+        for folder in folders_to_check:
+            for fname in target_filenames:
+                possible_paths.append(folder / "data" / fname)
+                possible_paths.append(folder / fname)
             
         found_files = []
         seen = set()
@@ -533,7 +652,7 @@ class KeyGenApp(ctk.CTk):
         return found_files
 
     def run_deactivate_license(self):
-        """🚫 ฟีเจอร์ที่ 1: ถอนไลเซ้น (Deactivate License)"""
+        """🚫 ฟีเจอร์ที่ 1: ถอนไลเซ้นแบบหมดจด (Deactivate License -> Force Activate Window)"""
         # ก่อนทำงาน ให้ Kill POS ก่อนเพื่อไม่ให้ไฟล์ล็อก
         self.run_kill_process()
         
@@ -541,8 +660,8 @@ class KeyGenApp(ctk.CTk):
         
         # สอบถามว่าจะเลือกไฟล์เองหรือสแกนอัตโนมัติ
         select_mode = messagebox.askyesnocancel(
-            "ถอนไลเซ้น",
-            "คุณต้องการเลือกไฟล์ License เองใช่หรือไม่?\n\n"
+            "ถอนไลเซ้น (Deactivate)",
+            "คุณต้องการเลือกโฟลเดอร์/ไฟล์ License เองใช่หรือไม่?\n\n"
             "• กด 'Yes' เพื่อเลือกไฟล์ด้วยตนเอง (Manual Select)\n"
             "• กด 'No' เพื่อใช้ระบบถอนสิทธิ์อัตโนมัติ (Auto Scan)\n"
             "• กด 'Cancel' เพื่อยกเลิก"
@@ -554,20 +673,31 @@ class KeyGenApp(ctk.CTk):
         if select_mode: # Manual Select
             file_path = filedialog.askopenfilename(
                 title="เลือกไฟล์ License ที่ต้องการถอน",
-                filetypes=[("License files", "*.license"), ("All files", "*.*")]
+                filetypes=[("License files", "*.license*"), ("Trial files", ".*"), ("All files", "*.*")]
             )
             if not file_path:
                 return
             found_files = [Path(file_path)]
             
         if not found_files:
-            messagebox.showinfo("ไม่พบสิทธิ์", "ระบบตรวจไม่พบการติดตั้ง License ในโฟลเดอร์ใดๆ เลย")
-            return
+            # ถ้า Auto Scan แล้วไม่พบ ให้ถามเลือกโฟลเดอร์หรือแจ้งเตือน
+            manual = messagebox.askyesno("ไม่พบไฟล์สิทธิ์", "ระบบตรวจไม่พบการติดตั้ง License ในโฟลเดอร์มาตรฐาน\n\nต้องการเลือกโฟลเดอร์โปรแกรมเองหรือไม่?")
+            if manual:
+                folder = filedialog.askdirectory(title="เลือกโฟลเดอร์โปรแกรม POS")
+                if folder:
+                    p = Path(folder)
+                    for fn in [".license", ".license_3days", ".license_30days", ".trial", ".trial_3days", ".trial_30days"]:
+                        if (p / "data" / fn).exists(): found_files.append(p / "data" / fn)
+                        if (p / fn).exists(): found_files.append(p / fn)
+            if not found_files:
+                messagebox.showinfo("ไม่พบสิทธิ์", "ไม่พบไฟล์ License ในเครื่องแล้ว (พร้อมใช้งานในโหมดถอนสิทธิ์เรียบร้อย)")
+                return
             
         confirm = messagebox.askyesno(
-            "ยืนยันการถอน License",
-            f"คุณแน่ใจว่าต้องการลบไฟล์สิทธิ์การลงทะเบียนใช่หรือไม่?\n"
-            f"พบทั้งหมด: {len(found_files)} ตำแหน่ง"
+            "ยืนยันการถอน License แบบหมดจด",
+            f"คุณแน่ใจว่าต้องการถอนไลเซ้นและลบสิทธิ์ใช้งานทั้งหมดใช่หรือไม่?\n\n"
+            f"พบทั้งหมด: {len(found_files)} รายการ\n"
+            f"การถอนจะบังคับให้โปรแกรมกลับไปแสดงหน้า Activate ใหม่ในครั้งถัดไป"
         )
         if not confirm:
             return
@@ -582,8 +712,38 @@ class KeyGenApp(ctk.CTk):
             except Exception as e:
                 self.log(f"❌ ถอนสิทธิ์ไม่สำเร็จ ณ พาธ {f}: {e}")
                 
-        self.log(f"✅ ทำการถอนไลเซ้นในระบบเสร็จสิ้น (สำเร็จ {deleted_count} ไฟล์)")
-        messagebox.showinfo("สำเร็จ", f"ถอนไลเซ้นในเครื่องสำเร็จแล้ว (ลบทั้งหมด {deleted_count} จุด)")
+        # รีเซ็ตเวลาฐานข้อมูลเพื่อป้องกันการล็อกค้าง
+        folders_to_check = self._get_search_folders()
+        db_paths = []
+        for folder in folders_to_check:
+            db_paths.append(folder / "data" / "database.db")
+            db_paths.append(folder / "database.db")
+        
+        seen_dbs = set()
+        for dbp in db_paths:
+            try:
+                norm = dbp.resolve().absolute()
+            except:
+                norm = dbp.absolute()
+            if norm not in seen_dbs:
+                seen_dbs.add(norm)
+                if norm.exists():
+                    try:
+                        conn = sqlite3.connect(norm)
+                        c = conn.cursor()
+                        c.execute("DELETE FROM settings WHERE setting_key IN ('last_run_timestamp', 'trial_start_date', 'last_run_timestamp_3days', 'trial_start_date_3days')")
+                        conn.commit()
+                        conn.close()
+                        self.log(f"🧹 รีเซ็ตค่าสิทธิ์ในฐานข้อมูล: {norm}")
+                    except Exception as ex:
+                        pass
+                
+        self.log(f"✅ ทำการถอนไลเซ้นในระบบเสร็จสิ้น ลบแบบหมดจด (สำเร็จ {deleted_count} ไฟล์)")
+        messagebox.showinfo(
+            "ถอนไลเซ้นสำเร็จ! 🎉",
+            f"ถอนไลเซ้นในเครื่องเรียบร้อยแล้ว (ลบทั้งหมด {deleted_count} จุด)\n\n"
+            f"เมื่อเปิดโปรแกรม StorePOS ครั้งถัดไป จะกลับไปแสดงหน้า Activate (ลงทะเบียน) อีกครั้งทันที"
+        )
 
     def run_reset_license_cache(self):
         """🧹 ฟีเจอร์ที่ 2: ล้างสิ่งที่เครื่องจำอยู่เพื่อลงทะเบียนใหม่ (Reset Database & Trial File Cache)"""
@@ -613,23 +773,12 @@ class KeyGenApp(ctk.CTk):
                 pass
                 
         # 2. ลบไฟล์ทดลองใช้ฟรี .trial ทั้งหมด
+        folders_to_check = self._get_search_folders()
         trial_paths = []
-        import os
-        standard_folders = [
-            "C:/StorePOS",
-            "D:/StorePOS",
-            os.path.expanduser("~/Documents/store-pos"),
-            os.path.expanduser("~/Documents/StorePOS"),
-            os.path.expanduser("~/Desktop/store-pos"),
-            os.path.expanduser("~/Desktop/StorePOS"),
-            "C:/Program Files/StorePOS",
-            "C:/Program Files (x86)/StorePOS"
-        ]
-        for folder in standard_folders:
-            trial_paths.append(Path(folder) / "data" / ".trial")
-            trial_paths.append(Path(folder) / "data" / ".trial_3days")
-        trial_paths.append(Path("data/.trial").absolute())
-        trial_paths.append(Path("data/.trial_3days").absolute())
+        for folder in folders_to_check:
+            for fname in [".trial", ".trial_3days", ".trial_30days"]:
+                trial_paths.append(folder / "data" / fname)
+                trial_paths.append(folder / fname)
         
         deleted_trials = 0
         seen = set()
@@ -650,9 +799,9 @@ class KeyGenApp(ctk.CTk):
                         
         # 3. ล้างตารางสิทธิ์และการแจ้งเวลาในฐานข้อมูล SQLite
         db_paths = []
-        for folder in standard_folders:
-            db_paths.append(Path(folder) / "data" / "database.db")
-        db_paths.append(Path("data/database.db").absolute())
+        for folder in folders_to_check:
+            db_paths.append(folder / "data" / "database.db")
+            db_paths.append(folder / "database.db")
         
         cleaned_dbs = 0
         seen_dbs = set()

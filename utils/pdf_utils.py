@@ -252,15 +252,15 @@ def create_receipt_pdf(receipt_data, filename=None, paper_size="A4"):
                 from reportlab.graphics.barcode import code128
                 barcode_val = receipt_data.get('sale_number', '')
                 if barcode_val:
-                    barcode_flowable = code128.Code128(barcode_val, barHeight=10*mm, barWidth=0.5*mm)
+                    barcode_flowable = code128.Code128(barcode_val, barHeight=5*mm, barWidth=0.25*mm)
                     # ใส่ใน Table เพื่อจัดให้อยู่กึ่งกลาง
                     t_barcode = Table([[barcode_flowable]])
                     t_barcode.setStyle(TableStyle([
                         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                         ('LEFTPADDING', (0, 0), (-1, -1), 0),
                         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
-                        ('TOPPADDING', (0, 0), (-1, -1), 2*mm),
-                        ('BOTTOMPADDING', (0, 0), (-1, -1), 2*mm),
+                        ('TOPPADDING', (0, 0), (-1, -1), 1*mm),
+                        ('BOTTOMPADDING', (0, 0), (-1, -1), 1*mm),
                     ]))
                     story.append(t_barcode)
                     story.append(Paragraph(barcode_val, normal_style))
@@ -319,10 +319,11 @@ def export_sales_report(sales_data, filename):
     pass
 
 
-def create_barcode_labels_pdf(print_items, filename, cols=3, rows=10, show_name=True, show_price=True, show_code=True):
+def create_barcode_labels_pdf(print_items, filename, cols=6, rows=18, show_name=True, show_price=True, show_code=True):
     """
     สร้างไฟล์ PDF สำหรับพริ้นบาร์โค้ดสินค้าในแบบตาราง (Grid Labels) ลงในกระดาษ A4
-    ใช้ python-barcode สร้างภาพบาร์โค้ดจริง (scannable)
+    มาตรฐานเริ่มต้น 6 คอลัมน์ x 18 แถว (ดวงละ 3cm x 1.5cm / 108 ดวงต่อหน้า)
+    หรือปรับแถบให้เต็มสัดส่วนขอบไม่เหลือพื้นที่ว่างส่วนเกิน
     """
     register_thai_font()
     
@@ -338,7 +339,7 @@ def create_barcode_labels_pdf(print_items, filename, cols=3, rows=10, show_name=
         
         # กำหนดขนาดกระดาษ A4 (210 x 297 mm)
         page_w, page_h = A4
-        margin = 5 * mm
+        margin = 3 * mm
         printable_w = page_w - (2 * margin)
         printable_h = page_h - (2 * margin)
         
@@ -356,12 +357,16 @@ def create_barcode_labels_pdf(print_items, filename, cols=3, rows=10, show_name=
         
         styles = getSampleStyleSheet()
         
+        # ปรับขนาดฟอนต์ให้สมส่วน ไม่เล็กรวมกันเป็นก้อน
+        font_sz = 7.0 if cols >= 6 else 8.5
+        leading_sz = 8.0 if cols >= 6 else 9.5
+        
         name_style = ParagraphStyle(
             'LabelName',
             parent=styles['Normal'],
             fontName='THSarabunBold',
-            fontSize=8,
-            leading=9,
+            fontSize=font_sz,
+            leading=leading_sz,
             alignment=1,
             textColor=colors.black
         )
@@ -370,8 +375,8 @@ def create_barcode_labels_pdf(print_items, filename, cols=3, rows=10, show_name=
             'LabelInfo',
             parent=styles['Normal'],
             fontName='THSarabun',
-            fontSize=8,
-            leading=9,
+            fontSize=font_sz,
+            leading=leading_sz,
             alignment=1,
             textColor=colors.black
         )
@@ -396,11 +401,11 @@ def create_barcode_labels_pdf(print_items, filename, cols=3, rows=10, show_name=
                     bc_instance = code_class(str(code), writer=ImageWriter())
                     buf = BytesIO()
                     bc_instance.write(buf, options={
-                        'module_width': 0.25,
-                        'module_height': 8.0,
+                        'module_width': 0.15 if cols >= 6 else 0.2,
+                        'module_height': 5.0 if cols >= 6 else 6.0, # ปรับความสูงแถบให้เห็นชัด
                         'font_size': 0,
                         'text_distance': 1,
-                        'quiet_zone': 1.0,
+                        'quiet_zone': 0.5,
                         'write_text': False,
                     })
                     barcode_cache[code] = buf.getvalue()
@@ -414,24 +419,24 @@ def create_barcode_labels_pdf(print_items, filename, cols=3, rows=10, show_name=
                 
                 # 1. ชื่อสินค้า
                 if show_name:
-                    short_name = name[:35] + ".." if len(name) > 35 else name
+                    short_name = name[:26] + ".." if len(name) > 26 else name
                     label_story.append(Paragraph(short_name, name_style))
                 
-                # 2. แถบบาร์โค้ด (ภาพจริงที่สแกนได้)
+                # 2. แถบบาร์โค้ด (ปรับความสูงให้เต็มพื้นที่ดวง ไม่เหลือขอบบน-ล่างส่วนเกิน)
                 bc_data = barcode_cache.get(code)
                 if bc_data:
                     try:
                         bc_buf = BytesIO(bc_data)
-                        bc_width = cell_w - 6*mm
-                        bc_height = 7*mm
+                        bc_width = min(28*mm, cell_w - 3*mm)
+                        bc_height = max(5.5*mm, cell_h * 0.45) # ปรับความสูงให้เต็ม 45% ของพื้นที่ดวงสติกเกอร์
                         img = RLImage(bc_buf, width=bc_width, height=bc_height)
                         img.hAlign = 'CENTER'
                         label_story.append(img)
                     except Exception as e:
                         print(f"Barcode embed fail: {e}")
-                        label_story.append(Spacer(1, 7*mm))
+                        label_story.append(Spacer(1, 5*mm))
                 else:
-                    label_story.append(Spacer(1, 7*mm))
+                    label_story.append(Spacer(1, 5*mm))
                 
                 # 3. รหัสและราคา
                 info_parts = []
@@ -445,17 +450,17 @@ def create_barcode_labels_pdf(print_items, filename, cols=3, rows=10, show_name=
                         info_parts.append(f"<b>฿{price}</b>")
                     
                 if info_parts:
-                    info_text = "  |  ".join(info_parts)
+                    info_text = " ".join(info_parts)
                     label_story.append(Paragraph(info_text, info_style))
                     
-                label_table = Table([ [label_story] ], colWidths=[cell_w - 2*mm], rowHeights=[cell_h - 2*mm])
+                label_table = Table([ [label_story] ], colWidths=[cell_w], rowHeights=[cell_h])
                 label_table.setStyle(TableStyle([
                     ('ALIGN', (0,0), (-1,-1), 'CENTER'),
                     ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                    ('LEFTPADDING', (0,0), (-1,-1), 1),
-                    ('RIGHTPADDING', (0,0), (-1,-1), 1),
-                    ('TOPPADDING', (0,0), (-1,-1), 1),
-                    ('BOTTOMPADDING', (0,0), (-1,-1), 1),
+                    ('LEFTPADDING', (0,0), (-1,-1), 0.2),
+                    ('RIGHTPADDING', (0,0), (-1,-1), 0.2),
+                    ('TOPPADDING', (0,0), (-1,-1), 0.2),
+                    ('BOTTOMPADDING', (0,0), (-1,-1), 0.2),
                 ]))
                 
                 labels.append(label_table)
@@ -494,4 +499,386 @@ def create_barcode_labels_pdf(print_items, filename, cols=3, rows=10, show_name=
         import traceback
         traceback.print_exc()
         return False
+
+
+def create_full_receipt_a4(receipt_data, filename=None):
+    """
+    สร้างใบเสร็จรับเงิน/ใบกำกับภาษีเต็มรูปแบบ ขนาด A4 อย่างมืออาชีพ
+    """
+    register_thai_font()
+    
+    receipts_dir = Path("data/receipts")
+    receipts_dir.mkdir(parents=True, exist_ok=True)
+    
+    if filename is None:
+        sale_number = receipt_data.get('sale_number', 'RECEIPT')
+        filename = receipts_dir / f"receipt_A4_{sale_number}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+    else:
+        filename = Path(filename)
+        if not filename.is_absolute() and "data" not in str(filename):
+            filename = receipts_dir / filename
+            
+    if filename.parent:
+        filename.parent.mkdir(parents=True, exist_ok=True)
+        
+    try:
+        from reportlab.platypus import Image as RLImage
+        from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
+        import qrcode
+        from io import BytesIO
+        import os
+        
+        # ตั้งค่าขนาดเอกสาร A4 (210 x 297 mm) ระยะขอบ 15mm
+        doc = SimpleDocTemplate(
+            str(filename),
+            pagesize=A4,
+            leftMargin=15*mm,
+            rightMargin=15*mm,
+            topMargin=15*mm,
+            bottomMargin=15*mm
+        )
+        
+        styles = getSampleStyleSheet()
+        
+        # Styles
+        normal_style = ParagraphStyle(
+            'A4Normal',
+            parent=styles['Normal'],
+            fontName='THSarabun',
+            fontSize=10,
+            leading=12,
+            alignment=TA_LEFT
+        )
+        
+        normal_bold_style = ParagraphStyle(
+            'A4NormalBold',
+            parent=styles['Normal'],
+            fontName='THSarabunBold',
+            fontSize=10,
+            leading=12,
+            alignment=TA_LEFT
+        )
+        
+        right_style = ParagraphStyle(
+            'A4Right',
+            parent=styles['Normal'],
+            fontName='THSarabun',
+            fontSize=10,
+            leading=12,
+            alignment=TA_RIGHT
+        )
+        
+        center_style = ParagraphStyle(
+            'A4Center',
+            parent=styles['Normal'],
+            fontName='THSarabun',
+            fontSize=10,
+            leading=12,
+            alignment=TA_CENTER
+        )
+        
+        title_style = ParagraphStyle(
+            'A4Title',
+            parent=styles['Normal'],
+            fontName='THSarabunBold',
+            fontSize=16,
+            leading=19,
+            alignment=TA_RIGHT,
+            textColor=colors.HexColor('#1E3A8A')
+        )
+        
+        story = []
+        
+        # === Header Section (2 Columns: Seller Info Left / Document Info Right) ===
+        company_info = receipt_data.get('company', {})
+        shop_name = company_info.get('name', 'ชื่อร้านค้า')
+        shop_address = company_info.get('address', '-')
+        shop_tax_id = company_info.get('tax_id', '-')
+        shop_phone = company_info.get('phone', '-')
+        shop_branch = company_info.get('branch', 'สำนักงานใหญ่')
+        
+        seller_html = f"<b>{shop_name}</b><br/>{shop_address}<br/>เลขประจำตัวผู้เสียภาษี: {shop_tax_id} ({shop_branch})<br/>โทร: {shop_phone}"
+        seller_p = Paragraph(seller_html, normal_style)
+        
+        doc_title = Paragraph("<b>ใบเสร็จรับเงิน/ใบกำกับภาษี</b><br/><i>(Receipt / Tax Invoice)</i>", title_style)
+        
+        doc_details_html = f"""
+        <b>เลขที่เอกสาร / No.:</b> {receipt_data.get('sale_number', '-')}<br/>
+        <b>วันที่ / Date:</b> {receipt_data.get('sale_date', '-')}<br/>
+        <b>วิธีชำระเงิน / Payment:</b> {receipt_data.get('payment_method', 'เงินสด')}<br/>
+        <b>พนักงานขาย / Cashier:</b> {receipt_data.get('cashier', '-')}
+        """
+        doc_details_p = Paragraph(doc_details_html, normal_style)
+        
+        # ตาราง Header
+        header_table_data = [
+            [seller_p, doc_title],
+            ['', doc_details_p]
+        ]
+        
+        # colWidths: Left 90mm, Right 90mm
+        header_table = Table(header_table_data, colWidths=[90*mm, 90*mm])
+        header_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('SPAN', (0, 0), (0, 1)), # รวมเซลล์ด้านซ้าย
+            ('LEFTPADDING', (0,0), (-1,-1), 0),
+            ('RIGHTPADDING', (0,0), (-1,-1), 0),
+            ('TOPPADDING', (0,0), (-1,-1), 2),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+        ]))
+        story.append(header_table)
+        story.append(Spacer(1, 4*mm))
+        
+        # === Buyer/Customer Info Section ===
+        cust_name = receipt_data.get('customer_name') or 'ลูกค้าทั่วไป'
+        cust_tax_id = receipt_data.get('customer_tax_id') or '-'
+        cust_address = receipt_data.get('customer_address') or '-'
+        
+        buyer_html = f"""
+        <b>ลูกค้า / Customer:</b> {cust_name}<br/>
+        <b>ที่อยู่ / Address:</b> {cust_address}<br/>
+        <b>เลขประจำตัวผู้เสียภาษี / Tax ID:</b> {cust_tax_id}
+        """
+        buyer_p = Paragraph(buyer_html, normal_style)
+        
+        buyer_table = Table([[buyer_p]], colWidths=[180*mm])
+        buyer_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F8FAFC')),
+            ('LEFTPADDING', (0,0), (-1,-1), 8),
+            ('RIGHTPADDING', (0,0), (-1,-1), 8),
+            ('TOPPADDING', (0,0), (-1,-1), 6),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+        ]))
+        story.append(buyer_table)
+        story.append(Spacer(1, 5*mm))
+        
+        # === Items Table ===
+        # Columns: ลำดับ, รหัสสินค้า, รายการสินค้า, จำนวน, หน่วย, ราคาต่อหน่วย, ส่วนลด, จำนวนเงิน
+        header_center_style = ParagraphStyle(
+            'A4HeaderCenter',
+            parent=styles['Normal'],
+            fontName='THSarabunBold',
+            fontSize=11,
+            leading=13,
+            alignment=TA_CENTER,
+            textColor=colors.white
+        )
+
+        header_right_style = ParagraphStyle(
+            'A4HeaderRight',
+            parent=styles['Normal'],
+            fontName='THSarabunBold',
+            fontSize=11,
+            leading=13,
+            alignment=TA_RIGHT,
+            textColor=colors.white
+        )
+
+        items_header = [
+            Paragraph("<b>ลำดับ</b>", header_center_style),
+            Paragraph("<b>รหัสสินค้า</b>", header_center_style),
+            Paragraph("<b>รายการสินค้า</b>", header_center_style),
+            Paragraph("<b>จำนวน</b>", header_right_style),
+            Paragraph("<b>หน่วย</b>", header_center_style),
+            Paragraph("<b>ราคา/หน่วย</b>", header_right_style),
+            Paragraph("<b>ส่วนลด</b>", header_right_style),
+            Paragraph("<b>จำนวนเงิน</b>", header_right_style)
+        ]
+        
+        items_table_data = [items_header]
+        
+        for idx, item in enumerate(receipt_data.get('items', []), 1):
+            p_name = item.get('product_name', '-')
+            p_barcode = item.get('barcode') or '-'
+            qty = item.get('quantity', 0)
+            unit = item.get('unit') or 'ชิ้น'
+            price = item.get('unit_price', 0)
+            discount = item.get('discount_amount', 0)
+            total = item.get('total_price', 0)
+            
+            items_table_data.append([
+                Paragraph(str(idx), center_style),
+                Paragraph(str(p_barcode), center_style),
+                Paragraph(p_name, normal_style),
+                Paragraph(f"{qty:,}", right_style),
+                Paragraph(unit, center_style),
+                Paragraph(f"{price:,.2f}", right_style),
+                Paragraph(f"{discount:,.2f}", right_style),
+                Paragraph(f"{total:,.2f}", right_style)
+            ])
+            
+        # เติมแถวว่างเฉพาะกรณีที่มีรายการน้อยกว่า 10 รายการ (เพื่อให้สวยงามในหน้าเดียว)
+        if len(receipt_data.get('items', [])) < 10:
+            blank_rows = 10 - len(receipt_data.get('items', []))
+            for _ in range(blank_rows):
+                items_table_data.append(['', '', '', '', '', '', '', ''])
+            
+        # colWidths: ลำดับ 12mm, รหัส 28mm, รายการ 50mm, จำนวน 15mm, หน่วย 13mm, ราคา/หน่วย 22mm, ส่วนลด 18mm, จำนวนเงิน 22mm
+        # Total = 12+28+50+15+13+22+18+22 = 180mm
+        # repeatRows=1 เพื่อให้แสดงหัวตารางซ้ำที่ด้านบนสุดของทุกหน้าโดยอัตโนมัติเมื่อมีหลายหน้า
+        items_table = Table(
+            items_table_data, 
+            colWidths=[12*mm, 28*mm, 50*mm, 15*mm, 13*mm, 22*mm, 18*mm, 22*mm],
+            repeatRows=1
+        )
+        items_table.setStyle(TableStyle([
+            # Header Styling (Dark Blue)
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1E3A8A')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            # Body Grid
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('LEFTPADDING', (0, 0), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+        ]))
+        story.append(items_table)
+        story.append(Spacer(1, 4*mm))
+        
+        # === Summary Section ===
+        subtotal = receipt_data.get('subtotal', 0.0)
+        discount_amount = receipt_data.get('discount_amount', 0.0)
+        tax_amount = receipt_data.get('tax_amount', 0.0)
+        total_amount = receipt_data.get('total_amount', 0.0)
+        paid_amount = receipt_data.get('paid_amount', 0.0)
+        change_amount = receipt_data.get('change_amount', 0.0)
+        
+        # คำนวณราคาไม่รวม VAT
+        # ยอดก่อน VAT = ยอดสุทธิ - VAT
+        net_subtotal = total_amount - tax_amount
+        
+        custom_note = receipt_data.get('note') or receipt_data.get('notes')
+        if custom_note and str(custom_note).strip():
+            note_text = str(custom_note).strip()
+        else:
+            note_text = "บันทึกรายละเอียดหัวบิลและสิทธิ์การใช้งานผ่านฐานข้อมูลและสำรองไว้ครบถ้วน"
+            
+        summary_left_html = f"<b>หมายเหตุ / Note:</b> {note_text}"
+        summary_left_p = Paragraph(summary_left_html, normal_style)
+        
+        summary_right_data = [
+            [Paragraph("<b>ยอดรวม / Subtotal:</b>", normal_style), Paragraph(f"฿{subtotal:,.2f}", right_style)],
+            [Paragraph("<b>ส่วนลดบิล / Bill Discount:</b>", normal_style), Paragraph(f"฿{discount_amount:,.2f}", right_style)],
+            [Paragraph("<b>ยอดก่อนภาษี / Subtotal Net:</b>", normal_style), Paragraph(f"฿{net_subtotal:,.2f}", right_style)],
+            [Paragraph("<b>ภาษีมูลค่าเพิ่ม / VAT 7%:</b>", normal_style), Paragraph(f"฿{tax_amount:,.2f}", right_style)],
+            [Paragraph("<b>ยอดสุทธิ / Total:</b>", normal_bold_style), Paragraph(f"฿{total_amount:,.2f}", right_style)],
+            [Paragraph("<b>รับเงิน / Paid:</b>", normal_style), Paragraph(f"฿{paid_amount:,.2f}", right_style)],
+            [Paragraph("<b>เงินทอน / Change:</b>", normal_bold_style), Paragraph(f"฿{change_amount:,.2f}", right_style)]
+        ]
+        summary_right_table = Table(summary_right_data, colWidths=[55*mm, 25*mm])
+        summary_right_table.setStyle(TableStyle([
+            ('LEFTPADDING', (0,0), (-1,-1), 2),
+            ('RIGHTPADDING', (0,0), (-1,-1), 2),
+            ('TOPPADDING', (0,0), (-1,-1), 2),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+            ('LINEBELOW', (0, 3), (1, 3), 0.5, colors.HexColor('#CBD5E1')),
+            ('LINEBELOW', (0, 4), (1, 4), 1, colors.HexColor('#1E3A8A')),
+        ]))
+        
+        summary_table_data = [[summary_left_p, summary_right_table]]
+        summary_table = Table(summary_table_data, colWidths=[100*mm, 80*mm])
+        summary_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0,0), (-1,-1), 0),
+            ('RIGHTPADDING', (0,0), (-1,-1), 0),
+        ]))
+        story.append(summary_table)
+        story.append(Spacer(1, 6*mm))
+        
+        # === QR Code / Signatures Block ===
+        qr_img_path = None
+        # ค้นหาค่า PromptPay จากตาราง settings
+        try:
+            from database import DatabaseManager
+            db = DatabaseManager()
+            db.connect()
+            qr_setting = db.fetch_one("SELECT setting_value FROM settings WHERE setting_key = 'payment_qr_path'")
+            db.disconnect()
+            if qr_setting and qr_setting['setting_value'].strip():
+                test_path = Path(qr_setting['setting_value'].strip())
+                if test_path.exists():
+                    qr_img_path = str(test_path)
+        except Exception:
+            pass
+            
+        if not qr_img_path:
+            # สร้าง QR code อัตโนมัติ (ใส่ข้อมูลเลขที่บิลและยอดเงิน)
+            try:
+                qr = qrcode.QRCode(version=1, box_size=10, border=1)
+                qr.add_data(f"SaleNo: {receipt_data.get('sale_number')}\nTotal: {total_amount:,.2f}")
+                qr.make(fit=True)
+                img = qr.make_image(fill_color="black", back_color="white")
+                
+                buf = BytesIO()
+                img.save(buf, format='PNG')
+                buf.seek(0)
+                
+                # เขียนใส่ temp
+                os.makedirs("temp", exist_ok=True)
+                qr_img_path = f"temp/qr_a4_{receipt_data.get('sale_number')}.png"
+                with open(qr_img_path, 'wb') as f:
+                    f.write(buf.getvalue())
+            except Exception as e:
+                print(f"Failed to generate custom QR: {e}")
+                
+        qr_flowable = None
+        if qr_img_path and os.path.exists(qr_img_path):
+            try:
+                qr_flowable = RLImage(qr_img_path, width=28*mm, height=28*mm)
+                qr_flowable.hAlign = 'CENTER'
+            except Exception:
+                pass
+                
+        # ส่วนเซ็นลายชื่อ
+        sig_data = [
+            [
+                Paragraph("<b>ผู้รับเงิน / Collector</b>", center_style),
+                Paragraph("<b>ลูกค้า / Customer</b>", center_style)
+            ],
+            ['', ''], # ช่องว่างเซ็น
+            [
+                Paragraph("_______________________<br/>วันที่: _____/_____/_____", center_style),
+                Paragraph("_______________________<br/>วันที่: _____/_____/_____", center_style)
+            ]
+        ]
+        sig_table = Table(sig_data, colWidths=[65*mm, 65*mm], rowHeights=[6*mm, 15*mm, 10*mm])
+        sig_table.setStyle(TableStyle([
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ]))
+        
+        if qr_flowable:
+            footer_table = Table([[qr_flowable, sig_table]], colWidths=[40*mm, 140*mm])
+        else:
+            footer_table = Table([[sig_table]], colWidths=[180*mm])
+            
+        footer_table.setStyle(TableStyle([
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+            ('LEFTPADDING', (0,0), (-1,-1), 0),
+            ('RIGHTPADDING', (0,0), (-1,-1), 0),
+            ('LINEABOVE', (0,0), (-1,-1), 1, colors.HexColor('#E2E8F0')),
+            ('TOPPADDING', (0,0), (-1,-1), 8),
+        ]))
+        story.append(footer_table)
+        
+        # Build PDF
+        doc.build(story)
+        
+        # ล้างไฟล์ QR temp ถ้าเพิ่งสร้างขึ้นมา
+        if qr_img_path and "temp/qr_a4_" in qr_img_path and os.path.exists(qr_img_path):
+            try:
+                os.remove(qr_img_path)
+            except Exception:
+                pass
+                
+        return True, str(filename)
+    except Exception as e:
+        print(f"Error creating full A4 receipt PDF: {e}")
+        import traceback
+        traceback.print_exc()
+        return False, str(e)
 

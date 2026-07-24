@@ -21,23 +21,31 @@ if _is_windows():
         import ctypes.wintypes
 
         _user32 = ctypes.windll.user32
-        _ENGLISH_LAYOUT = ctypes.windll.kernel32.LoadKeyboardLayoutW("00000409", 1)
+        _ENGLISH_LAYOUT = _user32.LoadKeyboardLayoutW("00000409", 1)
 
-        def _get_current_layout(hwnd):
+        def _get_current_layout(hwnd=None):
             """ดึง keyboard layout ปัจจุบันของ thread ที่ใช้งาน"""
-            thread_id = _user32.GetWindowThreadProcessId(hwnd, None)
-            return _user32.GetKeyboardLayout(thread_id)
+            if hwnd:
+                thread_id = _user32.GetWindowThreadProcessId(hwnd, None)
+                return _user32.GetKeyboardLayout(thread_id)
+            return _user32.GetKeyboardLayout(0)
 
-        def _set_english_layout(hwnd):
-            """สลับ keyboard layout ไปเป็น EN-US"""
-            _user32.PostMessageW(hwnd, 0x0050, 0, _ENGLISH_LAYOUT)  # WM_INPUTLANGCHANGEREQUEST
+        def _set_english_layout(hwnd=None):
+            """สลับ keyboard layout ไปเป็น EN-US ทันที"""
+            if _ENGLISH_LAYOUT:
+                _user32.ActivateKeyboardLayout(_ENGLISH_LAYOUT, 1)
+                if hwnd:
+                    _user32.PostMessageW(hwnd, 0x0050, 0, _ENGLISH_LAYOUT)  # WM_INPUTLANGCHANGEREQUEST
 
         def _set_layout(hwnd, layout):
             """สลับ keyboard layout ไปเป็น layout ที่กำหนด"""
-            _user32.PostMessageW(hwnd, 0x0050, 0, layout)
+            if layout:
+                _user32.ActivateKeyboardLayout(layout, 1)
+                if hwnd:
+                    _user32.PostMessageW(hwnd, 0x0050, 0, layout)
 
         _CTYPES_AVAILABLE = True
-    except Exception:
+    except Exception as e:
         _CTYPES_AVAILABLE = False
 else:
     _CTYPES_AVAILABLE = False
@@ -58,12 +66,20 @@ def bind_english_input(widget, allow_thai=False):
     _prev_layout = [None]
 
     def on_focus_in(event):
-        """ตอน focus เข้าช่องบาร์โค้ด → สลับเป็น EN"""
+        """ตอน focus เข้าช่องบาร์โค้ด → สลับภาษาเป็น EN ทันที"""
         try:
             if _CTYPES_AVAILABLE:
                 hwnd = widget.winfo_id()
+                try:
+                    toplevel = widget.winfo_toplevel()
+                    top_hwnd = toplevel.winfo_id()
+                except Exception:
+                    top_hwnd = hwnd
+                
                 _prev_layout[0] = _get_current_layout(hwnd)
                 _set_english_layout(hwnd)
+                if top_hwnd != hwnd:
+                    _set_english_layout(top_hwnd)
         except Exception:
             pass
 
@@ -108,9 +124,14 @@ def translate_thai_barcode(text):
 
     # แผนผังแป้นพิมพ์ภาษาไทย (Kedmanee) -> ตัวเลขและสัญลักษณ์ในแป้นภาษาอังกฤษ
     mapping = {
-        'ๅ': '1', '/': '2', '_': '3', 'ภ': '4', 'ถ': '5',
+        'ๅ': '1', '/': '2', '-': '3', '_': '3', 'ภ': '4', 'ถ': '5',
         'ุ': '6', 'ึ': '7', 'ค': '8', 'ต': '9', 'จ': '0',
-        'ข': '-', 'ช': '='
+        'ข': '-', 'ช': '=',
+        # ตัวเลขไทย
+        '๑': '1', '๒': '2', '๓': '3', '๔': '4', '๕': '5',
+        '๖': '6', '๗': '7', '๘': '8', '๙': '9', '๐': '0',
+        # แถบ Shift บนแถวตัวเลข
+        '+': '2', 'ู': '5', '฿': '6', '๕': '7', '็': '8', 'ํ': '9', '๊': '0'
     }
 
     translated = []

@@ -31,7 +31,23 @@ DATABASE_PATH = DATA_DIR / "database.db"
 APP_NAME = "โปรแกรมขายหน้าร้าน-PSoft"
 APP_VERSION = "1.0.0"
 WINDOW_SIZE = "1400x800"
-MIN_WINDOW_SIZE = (1200, 700)
+MIN_WINDOW_SIZE = (1000, 560)
+
+def get_responsive_dialog_geometry(parent, target_w, target_h):
+    """คำนวณขนาดและตำแหน่งของ Dialog ให้อยู่กลางจอ และไม่เกินความจุหน้าจอ"""
+    try:
+        screen_w = parent.winfo_screenwidth()
+        screen_h = parent.winfo_screenheight()
+    except Exception:
+        screen_w, screen_h = 1366, 768
+    
+    w = min(target_w, max(360, screen_w - 40))
+    h = min(target_h, max(300, screen_h - 60))
+    
+    x = max(0, (screen_w // 2) - (w // 2))
+    y = max(0, (screen_h // 2) - (h // 2))
+    return f"{w}x{h}+{x}+{y}"
+
 
 # ธีมสี (Modern Blue Theme)
 COLORS = {
